@@ -1,0 +1,40 @@
+# ─────────────────────────────────────────────────────────────
+#  RL Experiments — shared configuration
+#  All agents read from this file via utils.load_config()
+#  Change values here to affect every experiment at once.
+# ─────────────────────────────────────────────────────────────
+system:
+  device: "auto" # "auto" | "cpu" | "mps" | "cuda"
+
+environment:
+  name: "CartPole-v1"
+  max_steps: 500 # gymnasium default cap per episode
+  solved_threshold: 195 # avg reward over eval_episodes to call "solved"
+  eval_episodes: 20 # how many episodes to run during evaluation
+
+training:
+  episodes: 500 # total training episodes
+  discount: 0.99 # γ — future reward discount factor
+  epsilon_start: 1.0 # start fully exploring
+  epsilon_end: 0.01 # minimum exploration floor
+  epsilon_decay: 0.995 # multiply epsilon by this each episode
+  seed: 42 # for reproducibility
+
+# Q-Learning specific
+qlearning:
+  learning_rate: 0.1
+  bins: 12 # buckets per continuous state dimension
+
+# DQN specific
+dqn:
+  learning_rate: 0.001 # Adam LR (smaller than Q-table — network is sensitive)
+  batch_size: 64 # mini-batch size for replay sampling
+  replay_capacity: 10000 # max transitions in replay buffer
+  hidden_size: 64 # neurons per hidden layer
+  target_update: 10 # sync target network every N episodes
+
+# Plotting
+plot:
+  smoothing_window: 20 # moving average window for reward curves
+  save_dir: "results" # where to save .png files
+  show: true # display plot interactively (set false for headless)
