@@ -8,15 +8,12 @@ Adding a new algorithm?
 
 Usage:
     python run_experiments.py
-    python run_experiments.py --config config.yaml   # explicit path
-    python run_experiments.py --agents qlearning     # single agent
     python run_experiments.py --env FrozenLake-v1
     python run_experiments.py --env FrozenLake-v1 --agents DQN PPO
     python run_experiments.py --config config.yaml --agents Q-Learning
 """
 
 import argparse
-import gymnasium as gym
 import numpy as np
 
 from utils import (
@@ -28,35 +25,33 @@ from utils import (
     make_env_factory,
     onehot,
     RewardShaper,
+    ExperimentLogger,
 )
 
-# ── register agents here ────────────────────────────────────
 from agents.qlearning import QLearningAgent
 from agents.dqn import DQNAgent
 from agents.ppo import PPOAgent
 
-AGENTS = {"Q-Learning": QLearningAgent, "DQN": DQNAgent, "PPO": PPOAgent}
+AGENTS = {
+    "Q-Learning": QLearningAgent,
+    "DQN": DQNAgent,
+    "PPO": PPOAgent,
+}
 
 
 # ─────────────────────────────────────────────
 #  OBSERVATION PREPROCESSING
-#  CartPole  → raw float vector (pass through)
-#  FrozenLake → integer tile → one-hot vector
-#               (for DQN/PPO which need vectors)
-#               (Q-Learning uses the int directly)
 # ─────────────────────────────────────────────
 def make_obs_fn(env_name: str, n_states: int, agent_name: str):
-    """Returns a function that preprocesses raw observations."""
     if env_name == "FrozenLake-v1" and agent_name != "Q-Learning":
         return lambda obs: onehot(obs, n_states)
-    return lambda obs: obs  # pass through
+    return lambda obs: obs
 
 
 # ─────────────────────────────────────────────
-#  CURRICULUM — grow map size as agent improves
+#  CURRICULUM SIZE
 # ─────────────────────────────────────────────
 def curriculum_size(rewards: list, cfg: dict) -> int:
-    """Return the map size based on recent performance."""
     if not get(cfg, "frozenlake", "curriculum", default=False):
         return get(cfg, "frozenlake", "size", default=4)
     thresholds = get(cfg, "frozenlake", "curriculum_thresholds", default=[])
@@ -69,52 +64,7 @@ def curriculum_size(rewards: list, cfg: dict) -> int:
 
 
 # ─────────────────────────────────────────────
-#  GENERIC TRAINING LOOP
-#  Works for any agent that implements:
-#    .select_action(obs) -> int
-#    .update(...)        -> loss or None
-#    .store(...) [optional, for DQN]
-#    .end_episode()
-# ─────────────────────────────────────────────
-# def train(agent, env, cfg: dict) -> list[float]:
-#     episodes = get(cfg, "training", "episodes")
-#     rewards = []
-
-#     for ep in range(episodes):
-#         obs, _ = env.reset()
-#         total = 0.0
-
-#         while True:
-#             action = agent.select_action(obs)
-#             next_obs, r, term, trunc, _ = env.step(action)
-#             done = term or trunc
-
-#             # Q-Learning: direct update
-#             # DQN: store then update from replay
-#             if hasattr(agent, "store"):
-#                 agent.store(obs, action, r, next_obs, done)
-#                 agent.update()
-#             else:
-#                 agent.update(obs, action, r, next_obs, done)
-
-#             obs = next_obs
-#             total += r
-#             if done:
-#                 break
-
-#         rewards.append(total)
-#         agent.end_episode()
-
-#         if (ep + 1) % 100 == 0:
-#             avg = np.mean(rewards[-50:])
-#             eps = float(agent.epsilon)
-#             print(f"  [{ep+1:4d}/{episodes}]  last-50 avg: {avg:6.1f}" f"  ε={eps:.3f}")
-
-#     return rewards
-
-
-# ─────────────────────────────────────────────
-#  GENERIC TRAINING LOOP
+#  TRAINING LOOP
 # ─────────────────────────────────────────────
 def train(
     agent, env_factory, cfg: dict, obs_fn=None, agent_name: str = ""
@@ -145,6 +95,9 @@ def train(
                 env.close()
             size = curriculum_size(rewards, cfg)
             env, map_desc = make_env_factory(cfg, size=size)()
+            # grow Q-table if the map just got larger
+            if hasattr(agent, "resize_table"):
+                agent.resize_table(size)
 
         # Fresh shaper each episode — map changes each time
         shaper = (
@@ -217,6 +170,7 @@ def main():
 
     env_name = get(cfg, "environment", "name")
     plotter = Plotter(cfg)
+    logger = ExperimentLogger(cfg)
     eval_results = {}
 
     for name in args.agents:
@@ -273,6 +227,7 @@ def main():
             cfg=cfg,
         )
         eval_results[name] = result
+        logger.log(agent_name=name, rewards=rewards, eval_result=result)
 
     plotter.print_summary(eval_results)
     tag = env_name.lower().replace("-", "_").replace("v1", "").rstrip("_")

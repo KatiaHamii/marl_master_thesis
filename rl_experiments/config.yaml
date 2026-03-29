@@ -1,71 +1,105 @@
 # ─────────────────────────────────────────────────────────────
 #  RL Experiments — shared configuration
-#  All agents read from this file via utils.load_config()
-#  Change values here to affect every experiment at once.
 # ─────────────────────────────────────────────────────────────
-system:
-  device: "auto" # "auto" | "cpu" | "mps" | "cuda"
 
 environment:
   name: "CartPole-v1"
-  max_steps: 500 # gymnasium default cap per episode
-  solved_threshold: 195 # avg reward over eval_episodes to call "solved"
-  eval_episodes: 20 # how many episodes to run during evaluation
+  max_steps: 500
+  solved_threshold: 195
+  eval_episodes: 50
 
 training:
-  episodes: 5000 # total training episodes
-  discount: 0.99 # γ — future reward discount factor
-  epsilon_start: 1.0 # start fully exploring
-  epsilon_end: 0.01 # minimum exploration floor
-  epsilon_decay: 0.995 # multiply epsilon by this each episode
-  seed: 42 # for reproducibility
+  episodes: 500
+  discount: 0.99
+  epsilon_start: 1.0
+  epsilon_end: 0.01
+  epsilon_decay: 0.999 # per-episode decay
+  epsilon_decay_per_step: 0.999942 # per-step decay (~10 steps/ep)5       # good for CartPole (500 episodes)
+  seed: 42
 
 # Q-Learning specific
 qlearning:
-  learning_rate: 0.001
-  bins: 12 # buckets per continuous state dimension
+  learning_rate: 0.1
+  bins: 12
 
 # DQN specific
 dqn:
-  learning_rate: 0.001 # Adam LR (smaller than Q-table — network is sensitive)
-  batch_size: 64 # mini-batch size for replay sampling
-  replay_capacity: 10000 # max transitions in replay buffer
-  hidden_size: 64 # neurons per hidden layer
-  target_update: 10 # sync target network every N episodes
+  learning_rate: 0.001
+  batch_size: 64
+  replay_capacity: 10000
+  hidden_size: 64
+  target_update: 10
 
 # PPO specific
 ppo:
-  learning_rate: 0.001 # lower than DQN — policy gradient is sensitive
+  learning_rate: 0.0003
   hidden_size: 64
-  epochs: 4 # how many passes over each collected batch
-  batch_size: 64 # mini-batch size within each epoch
-  update_every: 256 # collect this many steps before each update
-  clip_epsilon: 0.2 # max policy change per update (the "proximal" part)
-  value_coef: 0.5 # critic loss weight in combined loss
-  entropy_coef: 0.01 # entropy bonus — keeps policy from collapsing
-  gae_lambda: 0.95 # GAE smoothing (0=TD, 1=Monte Carlo)
+  epochs: 4
+  batch_size: 64
+  update_every: 256
+  clip_epsilon: 0.2
+  value_coef: 0.5
+  entropy_coef: 0.01
+  gae_lambda: 0.95
 
-# FrozenLake specific
+# System
+system:
+  device: "auto" # "auto" | "cpu" | "mps" | "cuda"
+
+# ─────────────────────────────────────────────────────────────
+#  FrozenLake — tuned separately from CartPole
+#  Each problem has very different learning dynamics:
+#    CartPole: dense reward, long episodes, 500 enough
+#    FrozenLake: sparse reward, short episodes, needs 10000+
+# ─────────────────────────────────────────────────────────────
 frozenlake:
-  size: 4 # grid size (4x4, 6x6, 8x8)
-  is_slippery: false # slippery ice — actions succeed only 1/3 of the time
-  domain_randomisation: true # regenerate map every episode
-  episodes: 5000 # FrozenLake needs many more episodes than CartPole
-  curriculum: true # grow map size as agent improves
-  curriculum_thresholds:
-    - [0.6, 6] # if last-100 avg > 0.6 → switch to 6x6
-    - [0.7, 8] # if last-100 avg > 0.7 → switch to 8x8
+  size: 4
+  is_slippery: false
+  domain_randomisation: true
+  episodes: 10000
 
-  # Reward shaping — critical for sparse-reward environments
-  # Without shaping, agent only sees +1 at goal — almost no learning signal
+  # Epsilon tuned for FrozenLake episode count
+  # 0.999^10000 = 0.000045 → nearly zero by end
+  epsilon_decay: 0.999 # per-episode decay
+  epsilon_decay_per_step: 0.999942 # per-step decay (~10 steps/ep)
+
+  # Curriculum — now reachable with better tuning
+  curriculum: true
+  curriculum_thresholds:
+    - [0.5, 6] # lowered: 0.5 avg → 6x6  (was 0.6, too hard)
+    - [0.65, 8] # lowered: 0.65 avg → 8x8  (was 0.7)
+
+  # DQN overrides for FrozenLake
+  # smaller buffer → less stale experience polluting updates
+  dqn_replay_capacity: 2000
+  dqn_target_update: 50 # sync less often — episodes are very short
+
+  # PPO overrides for FrozenLake
+  # smaller batch → more frequent updates on short episodes
+  ppo_update_every: 64 # was 256 — now ~5-10 episodes per update
+
+  # Reward shaping
   reward_shaping: true
-  reward_goal: 1.0 # reaching goal (keep original)
-  reward_hole: -0.5 # penalty for falling in a hole
-  reward_step: -0.01 # small step penalty → encourages shorter paths
-  reward_closer: 0.05 # bonus for moving closer to goal (Manhattan distance)
+  reward_goal: 1.0
+  reward_hole: -0.3 # softened: was -0.5, too harsh early on
+  reward_step: -0.005 # softened: was -0.01
+  reward_closer: 0.02 # reduced: was 0.05, was dominating goal signal
 
 # Plotting
 plot:
-  smoothing_window: 20 # moving average window for reward curves
-  save_dir: "results" # where to save .png files
-  show: true # display plot interactively (set false for headless)
+  smoothing_window: 100
+  save_dir: "results"
+  show: true
+
+# ─────────────────────────────────────────────────────────────
+#  MARL — Independent PPO (IPPO) on cooperative FrozenLake
+# ─────────────────────────────────────────────────────────────
+marl:
+  total_timesteps: 500000 # total env steps across both agents
+  n_envs: 4 # parallel envs for faster collection
+  learning_rate: 0.0003
+  n_steps: 256 # steps collected before each update
+  batch_size: 64
+  n_epochs: 4 # PPO update passes per batch
+  clip_range: 0.2
+  ent_coef: 0.01 # entropy bonus — keeps agents exploring

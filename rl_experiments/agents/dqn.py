@@ -8,7 +8,14 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from utils import get_device, load_config, get, EpsilonSchedule, ReplayBuffer
+from utils import (
+    get_device,
+    load_config,
+    get,
+    EpsilonSchedule,
+    ReplayBuffer,
+    get_device,
+)
 
 
 class _QNetwork(nn.Module):
@@ -36,13 +43,34 @@ class DQNAgent:
         self.cfg = cfg
         self.action_dim = action_dim
         self.discount = get(cfg, "training", "discount")
-        self.batch_size = get(cfg, "dqn", "batch_size")
-        self.target_upd = get(cfg, "dqn", "target_update")
+
+        # FrozenLake-specific overrides if present
+        env_name = get(cfg, "environment", "name", default="")
+        if env_name == "FrozenLake-v1":
+            self.batch_size = get(cfg, "dqn", "batch_size")
+            self.target_upd = get(
+                cfg,
+                "frozenlake",
+                "dqn_target_update",
+                default=get(cfg, "dqn", "target_update"),
+            )
+            replay_cap = get(
+                cfg,
+                "frozenlake",
+                "dqn_replay_capacity",
+                default=get(cfg, "dqn", "replay_capacity"),
+            )
+        else:
+            self.batch_size = get(cfg, "dqn", "batch_size")
+            self.target_upd = get(cfg, "dqn", "target_update")
+            replay_cap = get(cfg, "dqn", "replay_capacity")
+
         self.epsilon = EpsilonSchedule(cfg)
         self._ep_count = 0
 
         hidden = get(cfg, "dqn", "hidden_size")
 
+        # device MUST be set before networks are created and moved
         self.device = get_device(cfg)
         print(f"  DQN running on: {self.device}")
 
@@ -54,7 +82,7 @@ class DQNAgent:
         self.optimizer = optim.Adam(
             self.online.parameters(), lr=get(cfg, "dqn", "learning_rate")
         )
-        self.replay = ReplayBuffer(get(cfg, "dqn", "replay_capacity"))
+        self.replay = ReplayBuffer(replay_cap)
         self.loss_fn = nn.MSELoss()
 
     # ── action selection ─────────────────────────────────────
@@ -76,7 +104,8 @@ class DQNAgent:
         states, actions, rewards, next_states, dones = self.replay.sample(
             self.batch_size
         )
-        # ← move ALL tensors to device right after sampling
+
+        # move ALL tensors to device right after sampling
         states = states.to(self.device)
         actions = actions.to(self.device)
         rewards = rewards.to(self.device)

@@ -98,6 +98,36 @@ class RolloutBuffer:
 
 
 # ─────────────────────────────────────────────
+#  ROLLOUT BUFFER
+#  PPO collects a full batch of on-policy
+#  experience BEFORE doing any gradient updates.
+#  (opposite of DQN which updates every step)
+# ─────────────────────────────────────────────
+class RolloutBuffer:
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self.states = []
+        self.actions = []
+        self.log_probs = []
+        self.rewards = []
+        self.values = []
+        self.dones = []
+
+    def push(self, state, action, log_prob, reward, value, done):
+        self.states.append(state)
+        self.actions.append(action)
+        self.log_probs.append(log_prob)
+        self.rewards.append(reward)
+        self.values.append(value)
+        self.dones.append(done)
+
+    def __len__(self):
+        return len(self.rewards)
+
+
+# ─────────────────────────────────────────────
 #  PPO AGENT
 # ─────────────────────────────────────────────
 class PPOAgent:
@@ -122,6 +152,17 @@ class PPOAgent:
         self.entropy_coef = get(cfg, "ppo", "entropy_coef")  # exploration bonus
         self.gae_lambda = get(cfg, "ppo", "gae_lambda")  # GAE smoothing
         self.update_freq = get(cfg, "ppo", "update_every")  # steps between updates
+
+        env_name = get(cfg, "environment", "name", default="")
+        if env_name == "FrozenLake-v1":
+            self.update_freq = get(
+                cfg,
+                "frozenlake",
+                "ppo_update_every",
+                default=get(cfg, "ppo", "update_every"),
+            )
+        else:
+            self.update_freq = get(cfg, "ppo", "update_every")  # steps between updates
 
         hidden = get(cfg, "ppo", "hidden_size")
         self.net = _ActorCritic(state_dim, action_dim, hidden).to(self.device)
