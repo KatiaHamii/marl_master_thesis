@@ -27,10 +27,34 @@ from pathlib import Path
 
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import VecMonitor
+from stable_baselines3.common.callbacks import BaseCallback
 import supersuit as ss
 
 from utils import load_config, get
 from envs.frozen_lake_marl import env_creator, FrozenLakeMARLEnv
+
+
+# ─────────────────────────────────────────────
+#  REWARD LOGGING CALLBACK
+# ─────────────────────────────────────────────
+class RewardLoggerCallback(BaseCallback):
+    """Records mean episode reward after each rollout."""
+
+    def __init__(self):
+        super().__init__()
+        self.episode_rewards = []
+        self._ep_reward_buf = []
+
+    def _on_step(self) -> bool:
+        for info in self.locals.get("infos", []):
+            if "episode" in info:
+                self._ep_reward_buf.append(info["episode"]["r"])
+        return True
+
+    def _on_rollout_end(self):
+        if self._ep_reward_buf:
+            self.episode_rewards.append(float(np.mean(self._ep_reward_buf)))
+            self._ep_reward_buf = []
 
 
 # ─────────────────────────────────────────────
@@ -118,30 +142,63 @@ class IPPOTrainer:
     #  TRAINING
     # ─────────────────────────────────────────────
     def train(self):
-        """
-        Alternate training between agent_0 and agent_1.
-        Each agent collects n_steps * n_envs transitions then updates.
-        """
-        steps_per_agent = self.total_timesteps // 2
-        rewards_log = {"agent_0": [], "agent_1": []}
+        """Train each agent independently, recording episode rewards."""
+        steps_per_agent = self.total_timesteps // len(self.agents)
+        self._reward_logs = {}
         t_start = time.time()
 
-        print("Training agent_0 and agent_1 alternately...\n")
-
-        chunk = steps_per_agent // 20  # log 20 times total
-        logged_at = 0
+        print("Training agents independently...\n")
 
         for agent_name, agent in self.agents.items():
             print(f"  Training {agent_name}...")
+            cb = RewardLoggerCallback()
             agent.learn(
                 total_timesteps=steps_per_agent,
                 reset_num_timesteps=True,
                 progress_bar=True,
+                callback=cb,
             )
+            self._reward_logs[agent_name] = cb.episode_rewards
 
         elapsed = time.time() - t_start
         print(f"\nTraining done in {elapsed:.1f}s")
-        return rewards_log
+        return self._reward_logs
+
+    # ─────────────────────────────────────────────
+    #  PLOT TRAINING CURVES
+    # ─────────────────────────────────────────────
+    def plot(self):
+        logs = getattr(self, "_reward_logs", None)
+        if not logs:
+            print("No training data to plot — run train() first.")
+            return
+
+        colors = {"agent_0": "#3b8be0", "agent_1": "#e06b3b", "agent_2": "#3b9e60"}
+        window = 10  # smoothing window
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+        fig.suptitle("IPPO — Training progress per agent", fontsize=13, fontweight="bold")
+
+        for agent_name, rewards in logs.items():
+            color = colors.get(agent_name, "#888780")
+            ax.plot(rewards, color=color, linewidth=0.5, alpha=0.3)
+            if len(rewards) >= window:
+                smoothed = np.convolve(rewards, np.ones(window) / window, mode="valid")
+                ax.plot(range(window - 1, len(rewards)), smoothed,
+                        color=color, linewidth=2, label=agent_name)
+
+        ax.axhline(0, color="#aaaaaa", linewidth=0.8, linestyle="--")
+        ax.set_xlabel("Rollout")
+        ax.set_ylabel("Mean episode reward")
+        ax.legend(fontsize=10)
+        ax.spines[["top", "right"]].set_visible(False)
+
+        out = self.save_dir / "training_curves.png"
+        plt.tight_layout()
+        plt.savefig(out, dpi=150)
+        print(f"  Saved plot → {out}")
+        plt.show()
+        plt.close()
 
     # ─────────────────────────────────────────────
     #  EVALUATION
@@ -267,6 +324,7 @@ def main():
     else:
         trainer.train()
         trainer.save()
+        trainer.plot()
 
     trainer.evaluate(n_episodes=get(cfg, "environment", "eval_episodes", default=50))
 

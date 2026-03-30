@@ -78,7 +78,10 @@ class FrozenLakeMARLEnv(AECEnv):
 
         # obs: [own_pos | partner1_pos | partner2_pos | goal_pos | agent_id] all one-hot
         # agent_id: agent_0=[1,0,0], agent_1=[0,1,0], agent_2=[0,0,1]
-        obs_size = 4 * self.n_tiles + 3
+        # pad_tiles: fixes obs size across map sizes for curriculum weight transfer.
+        # defaults to n_tiles (no padding) → no change for non-curriculum training.
+        self.pad_tiles = fl.get("pad_tiles", self.n_tiles)
+        obs_size = 4 * self.pad_tiles + 3
         self.observation_spaces = {
             a: spaces.Box(0.0, 1.0, shape=(obs_size,), dtype=np.float32)
             for a in self.agents
@@ -154,7 +157,8 @@ class FrozenLakeMARLEnv(AECEnv):
         return self.action_spaces[agent]
 
     def _onehot(self, pos: int) -> np.ndarray:
-        v = np.zeros(self.n_tiles, dtype=np.float32)
+        # pad_tiles >= n_tiles: extra zeros fill the unused tile slots
+        v = np.zeros(self.pad_tiles, dtype=np.float32)
         v[pos] = 1.0
         return v
 
@@ -297,10 +301,13 @@ class FrozenLakeMARLEnv(AECEnv):
                 )
                 pygame.draw.rect(self.window, color, rect, border_radius=6)
 
-        # draw agents
+        # draw agents — skip any not in highlight_agents (if set)
+        active = getattr(self, "highlight_agents", None)
         for i, (agent, color) in enumerate(
             [("agent_0", (50, 100, 220)), ("agent_1", (220, 80, 50)), ("agent_2", (80, 180, 80))]
         ):
+            if active is not None and agent not in active:
+                continue
             pos = self._pos[agent]
             r, c = divmod(pos, self.size)
             cx = c * self.cell_px + self.cell_px // 2 + (i - 1) * 10

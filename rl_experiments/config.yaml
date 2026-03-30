@@ -53,7 +53,7 @@ system:
 #    FrozenLake: sparse reward, short episodes, needs 10000+
 # ─────────────────────────────────────────────────────────────
 frozenlake:
-  size: 4
+  size: 6
   is_slippery: false
   domain_randomisation: true
   episodes: 10000
