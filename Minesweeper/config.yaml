@@ -1,0 +1,64 @@
+# ─────────────────────────────────────────────────────────────
+#  Minesweeper MARL — configuration
+# ─────────────────────────────────────────────────────────────
+
+# Shared training settings
+training:
+  discount: 0.99
+
+# System
+system:
+  device: "auto" # "auto" | "cpu" | "mps" | "cuda"
+
+# ─────────────────────────────────────────────────────────────
+#  Minesweeper environment
+#
+#  Board layout:
+#    rows × cols cells, n_mines randomly placed each episode.
+#    Safe cells to reveal = rows*cols - n_mines.
+#
+#  Reward structure (shared — both agents receive same reward):
+#    +reward_safe   each new safe cell revealed
+#    +reward_win    bonus when ALL safe cells revealed (win)
+#    -reward_mine   hitting a mine (episode ends)
+#    -reward_waste  revealing an already-revealed cell (wasted move)
+#    -reward_step   per-step penalty (encourages efficiency)
+#
+#  pad_cells: fixed obs size for curriculum weight transfer.
+#    Default = rows*cols (no padding). Set to 81 (=9×9) for curriculum
+#    so obs_dim stays constant across 5×5→7×7→9×9 stages.
+# ─────────────────────────────────────────────────────────────
+minesweeper:
+  rows: 5
+  cols: 5
+  n_mines: 3
+  max_steps: 200
+  total_timesteps: 1000000
+  eval_episodes: 50
+
+  # Reward shaping
+  reward_safe: 0.5
+  reward_win: 2.0
+  reward_mine: -1.0
+  reward_waste: -0.05
+  reward_step: -0.01
+
+# ─────────────────────────────────────────────────────────────
+#  MAPPO — Multi-Agent PPO hyperparameters
+#
+#  Differences from IPPO (marl section in rl_experiments/config.yaml):
+#    - update_every: steps across BOTH agents before an update
+#      (512 = 256 per agent × 2 agents)
+#    - hidden_size: 128 (larger than IPPO's 64 — critic sees 2× obs)
+#    - Same clip_epsilon, gae_lambda, entropy_coef as IPPO
+# ─────────────────────────────────────────────────────────────
+mappo:
+  learning_rate: 0.0003
+  hidden_size: 128 # actor and critic hidden layer width
+  n_epochs: 4 # PPO update passes per collected batch
+  batch_size: 64
+  update_every: 512 # collect this many steps (total, all agents) before updating
+  clip_epsilon: 0.2 # PPO clipping — prevents large policy changes
+  value_coef: 0.5 # critic loss weight in total loss
+  entropy_coef: 0.01 # entropy bonus — keeps shared policy from collapsing
+  gae_lambda: 0.95 # GAE smoothing (1=MC, 0=TD)
