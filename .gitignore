@@ -8,6 +8,7 @@ __pycache__/
 
 # VS Code settings
 .vscode/
+.claude/
 
 # Distribution / packaging
 .Python
@@ -53,6 +54,9 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+
+# Folders
+marl_master_thesis/rl_experiments
 
 # Translations
 *.mo
@@ -208,3 +212,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+#image files
+*.jpg
+*.jpeg
+*.png
