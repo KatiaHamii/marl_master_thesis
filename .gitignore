@@ -56,7 +56,11 @@ coverage.xml
 cover/
 
 # Folders
-marl_master_thesis/rl_experiments
+rl_experiments/
+Minesweeper/
+overcooked_v2_rebuild/
+overcooked_rethinking/
+
 
 # Translations
 *.mo
@@ -217,3 +221,14 @@ __marimo__/
 *.jpg
 *.jpeg
 *.png
+
+# Models & Agents
+*.pt
+*.pkl
+*.zip
+
+# Logs & Plots
+*.log
+*.csv
+*.png
+*.gif
