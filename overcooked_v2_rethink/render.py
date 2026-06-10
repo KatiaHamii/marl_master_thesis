@@ -266,11 +266,12 @@ def render(
     show_window: bool = True,
     obs_every: int = 0,
     view_size: int = None,
+    obs_mode: str = "rich",
 ):
 
     params_0, params_1 = _load_params(results_dir)
     env = OvercookedV2(layout=layout, max_steps=400, agent_view_size=view_size)
-    network = ActorCritic(n_actions=env.num_actions, gru_hidden=hidden_size)
+    network = ActorCritic(n_actions=env.num_actions, gru_hidden=hidden_size, obs_mode=obs_mode)
 
     key = jax.random.PRNGKey(seed)
     print("Running episode...")
@@ -378,6 +379,14 @@ def main():
         help="Partial obs radius used during training (None = full obs). "
         "Must match the value used when training.",
     )
+    ap.add_argument(
+        "--obs-mode",
+        default="rich",
+        choices=["rich", "simple"],
+        help="Observation mode used during training. "
+        "Must match: 'rich' (ObsPreprocessor) or 'simple' (SimpleObsNormalizer). "
+        "Default: rich",
+    )
     args = ap.parse_args()
 
     results_dir = Path(args.results)
@@ -402,6 +411,7 @@ def main():
         show_window=not args.no_window,
         obs_every=args.obs_every,
         view_size=args.view_size,
+        obs_mode=args.obs_mode,
     )
 
 

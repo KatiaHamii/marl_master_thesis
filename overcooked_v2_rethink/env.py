@@ -115,6 +115,29 @@ class OvercookedV2(MultiAgentEnv):
         else:
             self.obs_shape = (self.height, self.width, NUM_OBS_CHANNELS)
 
+    def set_layout(self, layout_dict: Dict) -> None:
+        """
+        Update the environment's layout (for UED curriculum).
+
+        Applies mutations to the current layout by updating walls and object positions.
+
+        Args:
+            layout_dict: Dictionary with keys like 'walls', 'goal', 'pot', etc.
+        """
+        # Update walls
+        if 'walls' in layout_dict:
+            self.layout.walls = set(layout_dict['walls'])
+
+        # Update object positions (if provided)
+        if 'goal' in layout_dict:
+            self.layout.goal_pos = [layout_dict['goal']]
+        if 'pot' in layout_dict:
+            self.layout.pot_pos = [layout_dict['pot']]
+        if 'onion_pile' in layout_dict:
+            self.layout.onion_pile_pos = [layout_dict['onion_pile']]
+        if 'plate_pile' in layout_dict:
+            self.layout.plate_pile_pos = [layout_dict['plate_pile']]
+
     # ------------------------------------------------------------------ reset
 
     def reset(self, key: chex.PRNGKey) -> Tuple[Dict[str, chex.Array], State]:
@@ -171,6 +194,7 @@ class OvercookedV2(MultiAgentEnv):
         state, reward, shaped_rewards, collision_mask, wrong_pickups = self.step_agents(
             key, state, acts
         )
+        correct_delivery = state.new_correct_delivery  # Extract from state
         state = state.replace(time=state.time + 1)
         done = self.is_terminal(state)
         state = state.replace(terminal=done)
@@ -191,6 +215,7 @@ class OvercookedV2(MultiAgentEnv):
                 "shaped_reward_components": {f"agent_{i}": shaped_rewards[i]          for i in range(self.num_agents)},
                 "collision":                {f"agent_{i}": collision_mask[i]          for i in range(self.num_agents)},
                 "wrong_ingredient_pickup":  {f"agent_{i}": wrong_pickups[i]           for i in range(self.num_agents)},
+                "correct_delivery":         correct_delivery,  # True if correct delivery happened this step
             },
         )
 
@@ -210,14 +235,14 @@ class OvercookedV2(MultiAgentEnv):
         def _place(val, y, x):
             return jnp.zeros((H, W), dtype=jnp.float32).at[y, x].set(val)
 
-        # All-agent direction / inventory grids for the "other" channels
+        # All-agent direction / inventory grids for the "other" channels, Inventory = what the agent is currently carrying/holding
         all_dirs = jax.vmap(_place)(
             (state.agents.dir + 1).astype(jnp.float32),
             state.agents.pos.y,
             state.agents.pos.x,
         )  # (num_agents, H, W)
         all_invs = jax.vmap(_place)(
-            state.agents.inventory.astype(jnp.float32),
+            state.agents.inventory.astype(jnp.float32), # What agent is holding (0=empty, 1=plate, 2/3=ingredients, 6/7=dish)
             state.agents.pos.y,
             state.agents.pos.x,
         )  # (num_agents, H, W)

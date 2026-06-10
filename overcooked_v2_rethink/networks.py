@@ -52,6 +52,37 @@ _MAX_EXTRA  = 64.0  # safe upper bound for pot-timer / recipe normalisation
 
 # ── Observation preprocessor ──────────────────────────────────────────────────
 
+class SimpleObsNormalizer(nn.Module):
+    """
+    Minimal preprocessing: just normalize raw values to [0, 1].
+    Keeps obs shape as (H, W, 7) and lets network learn its own encoding.
+    """
+
+    @nn.compact
+    def __call__(self, obs: chex.Array) -> chex.Array:
+        """
+        obs : (H, W, 7)  float32 — raw compact observation
+        returns (H, W, 7) float32 — normalized to [0, 1]
+        """
+        # Normalize each channel to [0, 1]
+        # ch0, ch2: directions (0-5) → divide by 5
+        # ch1, ch3: inventories (0-16) → divide by 16
+        # ch4: static objects (0-15) → divide by 15
+        # ch5: dynamic items (0-255) → divide by 255
+        # ch6: extra (0-64) → divide by 64
+
+        normalized = jnp.concatenate([
+            obs[..., 0:1] / 5.0,      # ch0: direction
+            obs[..., 1:2] / 16.0,     # ch1: inventory
+            obs[..., 2:3] / 5.0,      # ch2: other direction
+            obs[..., 3:4] / 16.0,     # ch3: other inventory
+            obs[..., 4:5] / 15.0,     # ch4: static type
+            obs[..., 5:6] / 255.0,    # ch5: dynamic items
+            obs[..., 6:7] / 64.0,     # ch6: timer/recipe
+        ], axis=-1)
+        return normalized
+
+
 class ObsPreprocessor(nn.Module):
     """
     Converts the raw 7-channel compact obs into 51 binary / normalised channels.
@@ -90,6 +121,29 @@ class ObsPreprocessor(nn.Module):
             [static_oh, dir_self, dir_other, inv_self, inv_other, dyn, extra],
             axis=-1,
         )  # (H, W, 51)
+
+
+# ── Dense encoder (rl4mapf style) ──────────────────────────────────────────────
+
+class DenseEncoder(nn.Module):
+    """
+    Simple dense network that flattens the observation (like rl4mapf).
+    No spatial structure exploitation — just learn from flat features.
+    Input: (H, W, C) — any shape
+    Output: (128,) feature vector
+    """
+
+    @nn.compact
+    def __call__(self, x: chex.Array) -> chex.Array:
+        # Flatten spatial dimensions
+        x = x.reshape(-1)  # (H*W*C,) flat
+
+        # Dense layers
+        x = nn.Dense(256, kernel_init=nn.initializers.orthogonal(np.sqrt(2)))(x)
+        x = nn.relu(x)
+        x = nn.Dense(128, kernel_init=nn.initializers.orthogonal(np.sqrt(2)))(x)
+        x = nn.relu(x)
+        return x  # (128,)
 
 
 # ── Spatial encoder ────────────────────────────────────────────────────────────
@@ -161,6 +215,7 @@ class ActorCritic(nn.Module):
     n_actions:  int
     use_rnn:    bool = False
     gru_hidden: int  = GRU_HIDDEN
+    obs_mode:   str  = "rich"  # "rich" (ObsPreprocessor) or "simple" (SimpleObsNormalizer)
 
     @nn.compact
     def __call__(
@@ -168,8 +223,15 @@ class ActorCritic(nn.Module):
         obs:    chex.Array,
         hidden: Optional[chex.Array] = None,
     ):
-        x = ObsPreprocessor()(obs)       # (H, W, 51)
-        x = ConvEncoder()(x)             # (128,)
+        # Choose observation preprocessing and encoder
+        if self.obs_mode == "simple":
+            # Simple rl4mapf-style: minimal normalization + dense
+            x = SimpleObsNormalizer()(obs)   # (H, W, 7) normalized
+            x = DenseEncoder()(x)             # Flatten + dense layers
+        else:
+            # Rich: full preprocessing + spatial convolutions
+            x = ObsPreprocessor()(obs)       # (H, W, 51) fully decoded
+            x = ConvEncoder()(x)             # Conv spatial encoder
 
         if self.use_rnn:
             assert hidden is not None, "hidden required when use_rnn=True"
