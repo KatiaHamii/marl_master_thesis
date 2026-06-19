@@ -77,29 +77,28 @@ W   W   X
 WWWWWWWWW
 """
 
+# Progressive curriculum: simple 7x7 starting layout (compact, easy to learn)
+simple_7x7 = """
+WWWWWWW
+WPA OAW
+WPOBX RW
+W      W
+W      W
+W      W
+WWWWWWW
+"""
+
+
 
 # Other Layouts
-two_rooms_both = """
-W01BWB10W
-W   W   R
-P A W A W
-W   W   X
-WWWWWWWWW
-"""
-# long_room = """
-# WWWWWWWWWWWWWWW
-# B            AP
-# 0             X
-# WWWWWWWWWWWWWWW
-# """
 
-# modified for 2 agents
 long_room = """
 WWWWWWWWWWWWWWW
-B    A       AP
+B            AP
 0             X
 WWWWWWWWWWWWWWW
 """
+
 fun_coordination = """
 WWWWWWWWW
 0   X   2
@@ -373,7 +372,6 @@ overcooked_v2_layouts = {
     "asymm_advantages_recipes_left": Layout.from_string(asymm_advantages_recipes_left),
     "two_rooms": Layout.from_string(two_rooms),
     # Other layouts
-    "two_rooms_both": Layout.from_string(two_rooms_both),
     "long_room": Layout.from_string(long_room, possible_recipes=[[0, 0, 0]]),
     "fun_coordination": Layout.from_string(
         fun_coordination, possible_recipes=[[0, 0, 2], [1, 1, 3]]
