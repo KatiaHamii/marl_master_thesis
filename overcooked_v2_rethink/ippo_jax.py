@@ -159,10 +159,10 @@ class IPPOTrainer:
         obs_mode        str    observation mode: "rich" (51-ch) or "simple" (7-ch)
     """
 
-    def __init__(self, env, cfg: dict): #, curriculum_mgr=None):
+    def __init__(self, env, cfg: dict, curriculum_mgr=None):
         self.env = env
         self.cfg = cfg
-        #self.curriculum_mgr = curriculum_mgr
+        self.curriculum_mgr = curriculum_mgr
 
         self.n_envs = cfg.get("n_envs", 8)
         self.rollout_len = cfg.get("rollout_len", 512)
@@ -176,7 +176,7 @@ class IPPOTrainer:
         self.ent_coef = cfg.get("ent_coef", 0.01)
         self.reward_mode = cfg.get("reward_mode", "shaped")  # "shaped" | "delivery"
         self.obs_mode = cfg.get("obs_mode", "rich")  # "rich" | "simple"
-        self.shaped_reward_scale = cfg.get("shaped_reward_scale", 1.0)
+        self.shaped_reward_scale = cfg.get("shaped_reward_scale", 10.0)
         self.step_penalty = cfg.get("step_penalty", 0.0)
         self.collision_penalty = cfg.get("collision_penalty", 0.0)
         self.wrong_ingredient_penalty = cfg.get("wrong_ingredient_penalty", 0.0)
@@ -593,7 +593,12 @@ class IPPOTrainer:
             from overcooked_v2_rethink.settings import DELIVERY_REWARD
             step_r_np = np.asarray(trs0.reward)  # (T, n_envs)
             ep_lens_np = np.asarray(ep_lens)  # (T, n_envs)
-            deliveries_per_step = (step_r_np == DELIVERY_REWARD).astype(np.int32)  # (T, n_envs)
+            # In shaped mode reward = DELIVERY_REWARD + shaping (never exactly 20),
+            # in delivery mode reward is normalised to 1.0 — use mode-aware threshold.
+            if self.reward_mode == "delivery":
+                deliveries_per_step = (step_r_np >= 1.0).astype(np.int32)
+            else:  # shaped / sparse: delivery spike is always >= 20
+                deliveries_per_step = (step_r_np >= DELIVERY_REWARD).astype(np.int32)
             # Accumulate deliveries per episode (reset on episode boundary)
             ep_deliveries = np.zeros(self.n_envs, dtype=np.int32)
             for t in range(self.rollout_len):
@@ -609,11 +614,11 @@ class IPPOTrainer:
                         all_ep_returns.append(ep_return)
 
                         # Track in curriculum if enabled
-                        # if self.curriculum_mgr:
-                        #     self.curriculum_mgr.record_episode(
-                        #         self.curriculum_mgr.current_layout,
-                        #         delivery_count
-                        #     )
+                        if self.curriculum_mgr:
+                            self.curriculum_mgr.record_episode(
+                                self.curriculum_mgr.current_layout,
+                                delivery_count
+                            )
 
                         # Write to episode log (only if there were deliveries)
                         if episode_log_writer:
@@ -682,12 +687,12 @@ class IPPOTrainer:
                 )
 
                 # Check curriculum promotion
-                # if self.curriculum_mgr:
-                #     promoted = self.curriculum_mgr.check_promotion(update_i)
-                #     curr_status = self.curriculum_mgr.get_status()
-                #     status_str += f"  |  lvl={curr_status['current_level']}  layout={curr_status['current_layout']}"
-                #     if promoted:
-                #         status_str += f"  ✓PROMOTED"
+                if self.curriculum_mgr:
+                    promoted = self.curriculum_mgr.check_promotion(update_i)
+                    curr_status = self.curriculum_mgr.get_status()
+                    status_str += f"  |  lvl={curr_status['current_level']}  layout={curr_status['current_layout']}"
+                    if promoted:
+                        status_str += f"  ✓PROMOTED"
 
                 print(status_str, flush=True)
                 log.append(
@@ -713,9 +718,9 @@ class IPPOTrainer:
             episode_log_file.close()
 
         # Save curriculum state if enabled
-        # if self.curriculum_mgr and checkpoint_dir:
-        #     curriculum_path = Path(checkpoint_dir) / "curriculum_state.json"
-        #     self.curriculum_mgr.save(curriculum_path)
+        if self.curriculum_mgr and checkpoint_dir:
+            curriculum_path = Path(checkpoint_dir) / "curriculum_state.json"
+            self.curriculum_mgr.save(curriculum_path)
 
         total_deliveries = sum(all_ep_deliveries) if all_ep_deliveries else 0
         print(

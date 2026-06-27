@@ -106,13 +106,20 @@ class ObsPreprocessor(nn.Module):
         dir_other = jax.nn.one_hot(obs[..., 2].astype(jnp.int32).clip(0, 4), _N_DIR)
 
         # ch1, ch3, ch5 — bit-packed integers → 8 binary channels each
+        # def _bits(x: chex.Array) -> chex.Array:
+        #     x = x.astype(jnp.int32)
+        #     return jnp.stack([(x >> i) & 1 for i in range(_N_BITS)], axis=-1).astype(jnp.float32)
+        
         def _bits(x: chex.Array) -> chex.Array:
-            x = x.astype(jnp.int32)
-            return jnp.stack([(x >> i) & 1 for i in range(_N_BITS)], axis=-1).astype(jnp.float32)
+            x = x.astype(jnp.int32)[..., None] # add new dimension (H, W, 1)
+            shifts = jnp.arange(_N_BITS)       # [0, 1, 2, 3, 4, 5, 6, 7]
+            return ((x >> shifts) & 1).astype(jnp.float32) # Automatic broadcasting to (H, W, 8)
 
         inv_self  = _bits(obs[..., 1])   # (H, W, 8)
         inv_other = _bits(obs[..., 3])   # (H, W, 8)
         dyn       = _bits(obs[..., 5])   # (H, W, 8)
+        
+        
 
         # ch6 — pot timer + recipe → scalar in [0, 1]
         extra = (obs[..., 6] / _MAX_EXTRA).clip(0.0, 1.0)[..., None]  # (H, W, 1)
@@ -136,7 +143,8 @@ class DenseEncoder(nn.Module):
     @nn.compact
     def __call__(self, x: chex.Array) -> chex.Array:
         # Flatten spatial dimensions
-        x = x.reshape(-1)  # (H*W*C,) flat
+        #x = x.reshape(-1)  # (H*W*C,) flat
+        x = x.reshape((x.shape[:-3] + (-1,)))
 
         # Dense layers
         x = nn.Dense(256, kernel_init=nn.initializers.orthogonal(np.sqrt(2)))(x)
@@ -163,7 +171,8 @@ class ConvEncoder(nn.Module):
                             kernel_init=nn.initializers.orthogonal(np.sqrt(2)))(x))
         x = nn.relu(nn.Conv(64, (3, 3), padding="SAME",
                             kernel_init=nn.initializers.orthogonal(np.sqrt(2)))(x))
-        x = x.reshape(-1)
+        #x = x.reshape(-1)
+        x = x.reshape((x.shape[:-3] + (-1,)))
 
         x = nn.relu(nn.LayerNorm()(
             nn.Dense(256, kernel_init=nn.initializers.orthogonal(np.sqrt(2)))(x)

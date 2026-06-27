@@ -73,15 +73,34 @@ def get_layout(name: str) -> str:
 
 # ── Object type IDs ────────────────────────────────────────────────────────────
 
-EMPTY        = 0
-AGENT_0      = 2   # red  triangle
-AGENT_1      = 3   # blue triangle
-GOAL         = 4   # green filled cell
-POT          = 5   # orange circle
-OBSTACLE     = 8   # wall — dark cell + grey X cross
-PLATE_PILE   = 9   # white circles
-INGREDIENT_0 = 10  # yellow circles
-INGREDIENT_1 = 11  # dark-green circles
+class GridCodes:
+    """All grid-cell integer codes in one namespace — import the class, not each constant."""
+    EMPTY        = 0
+    AGENT_0      = 2   # red  triangle
+    AGENT_1      = 3   # blue triangle
+    GOAL         = 4   # green filled cell
+    POT          = 5   # orange circle
+    OBSTACLE     = 8   # wall — dark cell + grey X cross
+    PLATE_PILE   = 9   # white circles
+    INGREDIENT_0 = 10  # yellow circles
+    INGREDIENT_1 = 11  # dark-green circles
+    INGREDIENT_2 = 12
+
+    # Density caps (belong here — they constrain how codes are placed)
+    MAX_OBS_FRAC = 0.6   # obstacles fill at most 60 % of interior cells per half
+    MAX_RES_FRAC = 0.4   # resources fill at most 40 % of remaining interior cells per half
+
+# Module-level aliases — keep existing code working without changes
+EMPTY        = GridCodes.EMPTY
+AGENT_0      = GridCodes.AGENT_0
+AGENT_1      = GridCodes.AGENT_1
+GOAL         = GridCodes.GOAL
+POT          = GridCodes.POT
+OBSTACLE     = GridCodes.OBSTACLE
+PLATE_PILE   = GridCodes.PLATE_PILE
+INGREDIENT_0 = GridCodes.INGREDIENT_0
+INGREDIENT_1 = GridCodes.INGREDIENT_1
+INGREDIENT_2 = GridCodes.INGREDIENT_2
 
 # ── Rendering palette ──────────────────────────────────────────────────────────
 
@@ -98,10 +117,9 @@ C_RED        = (210,  60,  60)
 C_BLUE       = ( 60, 100, 210)
 C_LEGEND_BG  = (245, 245, 245)
 
-# ── Mutation density caps ──────────────────────────────────────────────────────
-
-MAX_OBS_FRAC = 0.8   # obstacles fill at most 80 % of interior cells per half
-MAX_RES_FRAC = 0.8   # resources fill at most 80 % of remaining interior cells per half
+# Module-level aliases for density caps
+MAX_OBS_FRAC = GridCodes.MAX_OBS_FRAC
+MAX_RES_FRAC = GridCodes.MAX_RES_FRAC
 
 # ── Parameter dataclass ────────────────────────────────────────────────────────
 
@@ -215,7 +233,58 @@ def generate_random_layout(
     return grid
 
 
+
 # ── Reachability check (BFS) ───────────────────────────────────────────────────
+def compute_min_cycle(grid: np.ndarray) -> int:
+    """Return the minimum delivery cycle length for the given layout.
+
+    Approximates the shortest path for one complete delivery:
+      agents → ingredient → pot → plate_pile → goal
+
+    Each segment is the minimum BFS distance from any cell of the source
+    type to any adjacent cell of the target type.  Shorter total = easier.
+    """
+    H, W = grid.shape
+    walkable = {EMPTY, AGENT_0, AGENT_1}
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1)] # one row up, one row down, one col left, one col right
+
+    def _bfs_min(starts: list[tuple], targets: frozenset) -> int:
+        """Min BFS steps walking from any start until adjacent to any target."""
+        visited: set = set(starts)
+        queue: deque = deque(starts)
+        steps = 0
+        while queue:
+            for _ in range(len(queue)):
+                r, c = queue.popleft() #row, col
+                for dr, dc in dirs: # delta row, delta col
+                    nr, nc = r + dr, c + dc # compute neighbour cells
+                    if not (0 <= nr < H and 0 <= nc < W):
+                        continue
+                    if grid[nr, nc] in targets:
+                        return steps + 1
+                    if (nr, nc) not in visited and grid[nr, nc] in walkable:
+                        visited.add((nr, nc))
+                        queue.append((nr, nc))
+            steps += 1
+        return 9999  # unreachable
+
+    agents      = [(r, c) for r in range(H) for c in range(W)
+                   if grid[r, c] in (AGENT_0, AGENT_1)]
+    ingredients = [(r, c) for r in range(H) for c in range(W)
+                   if grid[r, c] in (INGREDIENT_0, INGREDIENT_1)]
+    pots        = [(r, c) for r in range(H) for c in range(W)
+                   if grid[r, c] == POT]
+    plates      = [(r, c) for r in range(H) for c in range(W)
+                   if grid[r, c] == PLATE_PILE]
+
+    if not (agents and ingredients and pots and plates):
+        return 9999
+
+    d1 = _bfs_min(agents,      frozenset({INGREDIENT_0, INGREDIENT_1}))
+    d2 = _bfs_min(ingredients, frozenset({POT}))
+    d3 = _bfs_min(pots,        frozenset({PLATE_PILE}))
+    d4 = _bfs_min(plates,      frozenset({GOAL}))
+    return d1 + d2 + d3 + d4
 
 def is_valid_layout(grid: np.ndarray) -> bool:
     """
@@ -276,7 +345,7 @@ def is_valid_layout(grid: np.ndarray) -> bool:
     required = frozenset(task_cats)
     per_agent = [reachable_cats(pos) for pos in agent_pos]
 
-    # Rule 1: every agent reaches a goal
+    # Rule 1: every agent reaches a goal, for further steps
     if not all("goal" in cats for cats in per_agent):
         return False
 
@@ -286,7 +355,7 @@ def is_valid_layout(grid: np.ndarray) -> bool:
 
 # ── Tile renderer (PIL, 64×64 px) ─────────────────────────────────────────────
 
-_PILE_POS = [(0.50, 0.15), (0.28, 0.42), (0.78, 0.38), (0.38, 0.78), (0.72, 0.74)]
+_PILE_POS = [(0.50, 0.15), (0.28, 0.42), (0.78, 0.38), (0.38, 0.78), (0.72, 0.74)] #fixed pixel positions of the circles drawn inside a single tile for pile objects 
 
 
 def _circles_on_grey(draw: ImageDraw.Draw, positions, color, r_frac=0.14, s=TILE_PX):
@@ -320,12 +389,16 @@ def render_tile(obj: int, size: int = TILE_PX) -> Image.Image:
         draw.rectangle([(pad, pad), (s - 1 - pad, s - 1 - pad)], fill=C_GREEN)
 
     elif obj == POT:
+        C_POT = (25, 25, 25)
         draw.rectangle([(0, 0), (s - 1, s - 1)], fill=C_GREY)
-        cx, cy = s // 2, s // 2
-        r = int(0.30 * s)
-        draw.ellipse([(cx - r, cy - r), (cx + r, cy + r)], fill=C_ORANGE)
-        r2 = int(0.10 * s)
-        draw.ellipse([(cx - r2, cy - r2), (cx + r2, cy + r2)], fill=C_WHITE)
+        # body — wide, fills most of the cell
+        pad = max(3, int(0.10 * s))
+        body_top = int(0.30 * s)
+        draw.rectangle([(pad, body_top), (s - 1 - pad, int(0.90 * s))], fill=C_POT)
+        # handle — narrow knob centred on top of the body
+        hw = max(3, int(0.09 * s))
+        cx = s // 2
+        draw.rectangle([(cx - hw, int(0.12 * s)), (cx + hw, body_top)], fill=C_POT)
 
     elif obj == PLATE_PILE:
         _circles_on_grey(draw, [(0.30, 0.30), (0.72, 0.40), (0.40, 0.72)],
@@ -353,7 +426,7 @@ def render_tile(obj: int, size: int = TILE_PX) -> Image.Image:
 
 _LABEL = {
     OBSTACLE:     "Wall",
-    GOAL:         "Goal",
+    GOAL:         "Delivery\nStation",
     POT:          "Pot",
     PLATE_PILE:   "Plate",
     INGREDIENT_0: "Ingredient",
@@ -459,9 +532,39 @@ class ParametrizedOvercooked:
     params uniformly in [0, MAX_*_FRAC] and calling generate_random_layout().
 
     Encoding: (vector ∈ [0,1]^4, seed)
+
+    Single-import usage (no need to import individual constants or helpers)::
+
+        from overcooked_v2_rethink.overcooked_parametrized_current import (
+            ParametrizedOvercooked, EnvParams
+        )
+        G = ParametrizedOvercooked.codes        # GridCodes namespace
+        grid = ParametrizedOvercooked.make_layout(...)
+        ok   = ParametrizedOvercooked.validate(grid)
+        g    = ParametrizedOvercooked.from_string(layout_str)
     """
 
-    def __init__(self, base_grid: np.ndarray, seed: int = 42):
+    # ── Class-level access to codes and helpers ────────────────────────────────
+    codes = GridCodes
+
+    @staticmethod
+    def make_layout(H, W, params, key, **kwargs) -> np.ndarray:
+        """Alias for generate_random_layout — available without a separate import."""
+        return generate_random_layout(H, W, params, key, **kwargs)
+
+    @staticmethod
+    def validate(grid: np.ndarray) -> bool:
+        """Alias for is_valid_layout — available without a separate import."""
+        return is_valid_layout(grid)
+
+    @staticmethod
+    def from_string(layout_str: str) -> np.ndarray:
+        """Alias for parse_layout_string — available without a separate import."""
+        return parse_layout_string(layout_str)
+
+    # ── Instance ───────────────────────────────────────────────────────────────
+
+    def __init__(self, base_grid: np.ndarray, seed: int = 42, curriculum: bool = False, min_cycle: int = 0, max_cycle: int = 999):
         self.base_grid = base_grid
         self.H, self.W = base_grid.shape
         self.seed = seed
@@ -483,6 +586,10 @@ class ParametrizedOvercooked:
         self.current_seed   = 0
         self._counter       = 0          # increments on every attempt
         self.grid = base_grid.copy()
+        
+        # Curriculum learning parameters (allocation radius from CACTUS https://arxiv.org/abs/2401.05860)
+        self.curriculum   = curriculum 
+        self.cycle_range  = (min_cycle, max_cycle)
 
     # ── internal: generate from a single JAX key ──────────────────────────────
 
@@ -525,6 +632,10 @@ class ParametrizedOvercooked:
             key = jax.random.fold_in(jax.random.PRNGKey(self.seed), self._counter)
             candidate, params = self._generate_from_key(key)
             if is_valid_layout(candidate):
+                if self.curriculum:
+                    c = compute_min_cycle(candidate)
+                    if not (self.cycle_range[0] <= c <= self.cycle_range[1]):
+                        continue
                 self.current_params = params
                 self.current_seed   = self._counter
                 self.grid = candidate
@@ -534,22 +645,65 @@ class ParametrizedOvercooked:
         self.current_seed   = 0
         self.grid = self.base_grid.copy()
         return EnvParams().to_vector(), EnvParams()
+    
+    def set_cycle_range(self, min_cycle: int, max_cycle: int):
+        """Set the cycle length range for curriculum learning."""
+        self.cycle_range = (min_cycle, max_cycle)
 
-    def reset_with_seed(self, mutation_seed: int) -> Tuple[np.ndarray, EnvParams]:
-        """Reproduce a mutation exactly by its seed number."""
-        key = jax.random.fold_in(jax.random.PRNGKey(self.seed), mutation_seed)
-        candidate, params = self._generate_from_key(key)
-        self.current_params = params
-        self.current_seed   = mutation_seed
-        self.grid = candidate
-        return params.to_vector(), params
+    # def reset_with_seed(self, mutation_seed: int) -> Tuple[np.ndarray, EnvParams]:
+    #     """Reproduce a mutation exactly by its seed number."""
+    #     key = jax.random.fold_in(jax.random.PRNGKey(self.seed), mutation_seed)
+    #     candidate, params = self._generate_from_key(key)
+    #     self.current_params = params
+    #     self.current_seed   = mutation_seed
+    #     self.grid = candidate
+    #     return params.to_vector(), params
 
     def encoding(self) -> Tuple[np.ndarray, int]:
         return self.current_params.to_vector(), self.current_seed
 
+# ── Layout stats helper ────────────────────────────────────────────────────────
+
+def _grid_stats(grid: np.ndarray) -> dict:
+    """
+    Return human-readable counts for the mutation label:
+      obs_l, obs_denom_l  — walls placed / interior-left cells available
+      obs_r, obs_denom_r
+      ing_l, ing_denom_l  — ingredients placed / cells available before ing. placement
+      ing_r, ing_denom_r
+    """
+    H, W = grid.shape
+    mid = W / 2
+    interior = [(r, c) for r in range(1, H - 1) for c in range(1, W - 1)]
+    all_cells = [(r, c) for r in range(H) for c in range(W)]
+
+    int_l = [(r, c) for r, c in interior if c <  mid]
+    int_r = [(r, c) for r, c in interior if c >= mid]
+    all_l = [(r, c) for r, c in all_cells if c <  mid]
+    all_r = [(r, c) for r, c in all_cells if c >= mid]
+
+    # obstacles live in interior cells only
+    obs_l = sum(1 for r, c in int_l if grid[r, c] == OBSTACLE)
+    obs_r = sum(1 for r, c in int_r if grid[r, c] == OBSTACLE)
+
+    # ingredient denominator = all cells that were free after agents+obstacles
+    skip = {AGENT_0, AGENT_1, OBSTACLE}
+    ing_l = sum(1 for r, c in all_l if grid[r, c] in (INGREDIENT_0, INGREDIENT_1))
+    ing_r = sum(1 for r, c in all_r if grid[r, c] in (INGREDIENT_0, INGREDIENT_1))
+    ing_den_l = sum(1 for r, c in all_l if grid[r, c] not in skip)
+    ing_den_r = sum(1 for r, c in all_r if grid[r, c] not in skip)
+
+    return dict(
+        obs_l=obs_l, obs_dl=len(int_l),
+        obs_r=obs_r, obs_dr=len(int_r),
+        ing_l=ing_l, ing_dl=ing_den_l,
+        ing_r=ing_r, ing_dr=ing_den_r,
+    )
+
 # ── Interactive visualization window ──────────────────────────────────────────
 
-def run_interactive_viz(layout_str: str = None, seed: int = 42):
+def run_interactive_viz(layout_str: str = None, seed: int = 42,
+                        curriculum: bool = False, min_cycle: int = 0, max_cycle: int = 999):
     """
     Open an interactive matplotlib window.
 
@@ -574,7 +728,9 @@ def run_interactive_viz(layout_str: str = None, seed: int = 42):
     layout_str = layout_str or DEFAULT_LAYOUT
     base_grid  = parse_layout_string(layout_str)
     H, W       = base_grid.shape
-    env        = ParametrizedOvercooked(base_grid=base_grid, seed=seed)
+    env        = ParametrizedOvercooked(base_grid=base_grid, seed=seed,
+                                        curriculum=curriculum,
+                                        min_cycle=min_cycle, max_cycle=max_cycle)
 
     fig = plt.figure(figsize=(14, 8))
     fig.suptitle("Parametrized Environment Visualization (Overcooked Style)",
@@ -640,8 +796,8 @@ def run_interactive_viz(layout_str: str = None, seed: int = 42):
                 ax_i.cla(); ax_t.cla(); ax_t.axis("off")
             slot_idx[0] = 0
 
-        vec, params = env.reset()
-        ax_i, ax_t  = slot_axes[slot_idx[0]]
+        vec, _ = env.reset()
+        ax_i, ax_t = slot_axes[slot_idx[0]]
 
         ax_i.imshow(np.array(render_env(env.grid)))
         ax_i.axis("off")
@@ -649,11 +805,13 @@ def run_interactive_viz(layout_str: str = None, seed: int = 42):
 
         n_goals = int((env.grid == GOAL).sum())
         n_pots  = int((env.grid == POT).sum())
+        st    = _grid_stats(env.grid)
+        cycle = compute_min_cycle(env.grid)  # theoretical minimum walking distance if the agent already knows the perfect path
         enc = (
             f"[{vec[0]:.2f}, {vec[1]:.2f}, {vec[2]:.2f}, {vec[3]:.2f}]\n"
-            f"obs  L={params.obstacles_left:.2f}  R={params.obstacles_right:.2f}   "
-            f"res  L={params.resources_left:.2f}  R={params.resources_right:.2f}\n"
-            f"goals={n_goals}  pots={n_pots}  seed={env.current_seed}"
+            f"obs  L={st['obs_l']}/{st['obs_dl']}  R={st['obs_r']}/{st['obs_dr']}   "
+            f"res  L={st['ing_l']}/{st['ing_dl']}  R={st['ing_r']}/{st['ing_dr']}\n"
+            f"goals={n_goals}  pots={n_pots}  cycle={cycle}  seed={env.current_seed}"
         )
         ax_t.text(0.5, 0.5, enc, transform=ax_t.transAxes, fontsize=7.5,
                   ha="center", va="center", fontfamily="monospace")
@@ -666,9 +824,31 @@ def run_interactive_viz(layout_str: str = None, seed: int = 42):
 
 # ── Standalone entry point ─────────────────────────────────────────────────────
 
+# random mode (unchanged)
+# python overcooked_parametrized.py cramped_room
+
+# curriculum mode — only show layouts with cycle between 6 and 12
+# python overcooked_parametrized.py cramped_room --curriculum --min-cycle 6 --max-cycle 12
+
 if __name__ == "__main__":
-    import sys as _argv_sys
-    _layout_name = _argv_sys.argv[1] if len(_argv_sys.argv) > 1 else None
-    _seed        = int(_argv_sys.argv[2]) if len(_argv_sys.argv) > 2 else 42
-    _layout_str  = get_layout(_layout_name) if _layout_name else DEFAULT_LAYOUT
-    run_interactive_viz(layout_str=_layout_str, seed=_seed)
+    import argparse as _ap
+    _p = _ap.ArgumentParser(description="Parametrized Overcooked visualizer")
+    _p.add_argument("layout",      nargs="?", default=None,
+                    help="Layout name from layouts.py (default: asymm_advantages)")
+    _p.add_argument("--seed",      type=int, default=42)
+    _p.add_argument("--curriculum", action="store_true",
+                    help="Only accept layouts whose min delivery cycle is in [min-cycle, max-cycle]")
+    _p.add_argument("--min-cycle", type=int, default=0,
+                    help="Minimum delivery cycle length (curriculum mode)")
+    _p.add_argument("--max-cycle", type=int, default=999,
+                    help="Maximum delivery cycle length (curriculum mode)")
+    _args = _p.parse_args()
+
+    _layout_str = get_layout(_args.layout) if _args.layout else DEFAULT_LAYOUT
+    run_interactive_viz(
+        layout_str=_layout_str,
+        seed=_args.seed,
+        curriculum=_args.curriculum,
+        min_cycle=_args.min_cycle,
+        max_cycle=_args.max_cycle,
+    )
