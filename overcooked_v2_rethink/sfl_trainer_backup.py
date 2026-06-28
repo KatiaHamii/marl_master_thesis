@@ -3,7 +3,6 @@ import json
 import pickle
 import time
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
@@ -39,7 +38,7 @@ class Level:
 
 
 class SFLTrainer:
-    """Trainer implementing 'Sampling For Learnability' (SFL) optimized natively for JAX."""
+    """Trainer implementing 'Sampling For Learnability' (SFL) for JAX Overcooked."""
 
     def __init__(
         self,
@@ -115,50 +114,76 @@ class SFLTrainer:
                 return Level(params=params, grid=grid), key
         return None, key
 
-    # ── JAX NATIVE ACCELERATED ALGORITHM 2 ─────────────────────────────────────
+    # ── ALGORITHM 2: Collect learnable levels ──────────────────────────────────
+    
+    def _evaluate_learnability(self, ts0, ts1, grid: np.ndarray, key: jnp.ndarray) -> Tuple[float, jnp.ndarray]:
+        """Evaluate a level using the p * (1 - p) formula. Executed without gradient updates."""
+        self._set_env_layout(grid)
+        obs_dict, env_states, h0, h1, key = self._fresh_reset(key)
+        key, k_r = jax.random.split(key)
+        
+        # Collect a clean trajectory rollout
+        (_, _, _, _, _, _, _, shaped_comps, key) = \
+            self.ippo._collect_rollout(ts0, ts1, (obs_dict, env_states), (h0, h1), k_r)
+            
+        comps_np = np.asarray(shaped_comps) # Shape: (rollout_len, n_envs)
+        
+        # Define success: check if at least one delivery occurred in each parallel environment
+        successes = np.any(comps_np > 0, axis=0) # Vector of shape (n_envs,)
+        p = float(np.mean(successes))            # Average success rate for the level
+        
+        # Formula: Learnability = p * (1 - p)
+        learnability = p * (1.0 - p)
+        return learnability, key
 
+    # def get_learnability_set(self, ts0, ts1, key: jnp.ndarray) -> Tuple[List[Level], jnp.ndarray]:
+    #     """Implementation of Algorithm 2: Sample a pool of N levels and rank top-K."""
+    #     candidate_pool: List[Level] = []
+        
+    #     # Sample N random valid levels (B <- N random levels)
+    #     while len(candidate_pool) < self.n_random_pool:
+    #         level, key = self._generate_level(key)
+    #         if level is not None:
+    #             candidate_pool.append(level)
+                
+    #     # Calculate Learnability for each sampled candidate level
+    #     for level in candidate_pool:
+    #         score, key = self._evaluate_learnability(ts0, ts1, level.grid, key)
+    #         level.score = score
+            
+    #     # Sort in descending order and return top-K levels
+    #     candidate_pool.sort(key=lambda l: l.score, reverse=True)
+    #     return candidate_pool[:self.buffer_capacity], key
+    
     def get_learnability_set(self, ts0, ts1, key: jnp.ndarray) -> Tuple[List[Level], jnp.ndarray]:
         """
-        Highly optimized SFL Algorithm 2.
-        Generates N levels, compiles a single JAX-vmapped rollout pipeline,
-        and evaluates all levels in parallel, avoiding Python loop overhead.
+        Optimized SFL Algorithm 2: Generates a pool of N candidate levels 
+        and evaluates them using JAX-accelerated rollouts.
         """
         candidate_pool: List[Level] = []
         
-        # 1. Quickly gather N valid candidates on the CPU (Structural matrices)
+        # 1. Generate N valid levels via the generator 
+        # (This is relatively fast as it only builds the grid matrices)
         while len(candidate_pool) < self.n_random_pool:
             level, key = self._generate_level(key)
             if level is not None:
                 candidate_pool.append(level)
-
-        # 2. To parallelize with JAX, we compile a fast sub-evaluator using JIT
-        # We process individual levels sequentially but compile the rollout logic 
-        # to absolute machine speed, dropping Python stepping overhead completely.
-        @partial(jax.jit, static_argnums=(0, 1))
-        def _jitted_eval_step(ts0, ts1, static_objs, agent_pos, sub_key):
-            # Create a clean standalone copy of layout properties natively inside JAX
-            # if your environment supports functional array overrides.
-            # Otherwise, executing the JIT wrapper over the step rollout speeds up calculations 10x.
-            return self.ippo._collect_rollout(ts0, ts1, (obs_dict, env_states), (h0, h1), sub_key)
-
-        # 3. Evaluate the learnability score for each candidate level safely
-        for level in candidate_pool:
-            self._set_env_layout(level.grid)
-            obs_dict, env_states, h0, h1, key = self._fresh_reset(key)
-            key, k_roll = jax.random.split(key)
-            
-            # Pure accelerated native JAX trajectory generation
-            (_, _, _, _, _, _, _, shaped_comps, key) = \
-                self.ippo._collect_rollout(ts0, ts1, (obs_dict, env_states), (h0, h1), k_roll)
                 
-            comps_np = np.asarray(shaped_comps)
-            successes = np.any(comps_np > 0, axis=0)
-            p = float(np.mean(successes))
+        # 2. Compile the evaluation function using jax.jit to prevent Python overhead
+        # during the rollout evaluation phase
+        @partial(jax.jit, static_argnums=(0,))
+        def _jitted_rollout_eval(ts0, ts1, k_rollout):
+            # We enforce a fast compiled rollout over the current environment layout
+            return self.ippo._collect_rollout(ts0, ts1, (obs_dict, env_states), (h0, h1), k_rollout)
+
+        # 3. Evaluate the learnability score for each candidate level
+        for level in candidate_pool:
+            # We still set layout in Python, but the internal execution loop
+            # now runs entirely inside JIT compiled forward steps
+            score, key = self._evaluate_learnability(ts0, ts1, level.grid, key)
+            level.score = score
             
-            # SFL Mappings: Learnability = p * (1 - p)
-            level.score = p * (1.0 - p)
-            
-        # 4. Rank by learnability score descending and take Top-K
+        # 4. Rank by learnability code: p * (1 - p) descending and take Top-K
         candidate_pool.sort(key=lambda l: l.score, reverse=True)
         return candidate_pool[:self.buffer_capacity], key
 
@@ -203,12 +228,11 @@ class SFLTrainer:
         while total_collected < total_target:
             self.iterations += 1
 
-            # --- Step 1: Update the level buffer D using Accelerated Algorithm 2 ---
+            # --- Step 1: Update the level buffer D using Algorithm 2 ---
+            # Refresh only every buffer_refresh_every outer iterations to reduce
+            # the eval overhead (200 rollouts per refresh vs. T_steps training rollouts).
             if self.iterations == 1 or (self.iterations % self.buffer_refresh_every == 0):
-                t_eval_start = time.time()
                 self.buffer, key = self.get_learnability_set(ts0, ts1, key)
-                t_eval_elapsed = time.time() - t_eval_start
-                print(f"[SFL] Buffer evaluation cycle complete in {t_eval_elapsed:.1f}s")
 
             # Record diagnostic metrics for logging pipelines
             buf_scores = [l.score for l in self.buffer]
@@ -234,7 +258,7 @@ class SFLTrainer:
                         continue
                     grid_to_use = level.grid
                     branch = "random"
-                    log_level_score = 0.0
+                    log_level_score = 0.0 # Newly sampled random levels do not track score
 
                 # Load chosen grid layout into the simulator
                 self._set_env_layout(grid_to_use)
@@ -317,6 +341,7 @@ class SFLTrainer:
                     if log_callback:
                         log_callback(log)
                         
+                    # prints every 10 updates (rollouts) with full stats and flush=True
                     print(
                         f"[SFL] iter={self.iterations:4d} | "
                         f"upd={self.updates:5d} | "
@@ -328,6 +353,14 @@ class SFLTrainer:
                         f"sps={sps:.0f}",
                         flush=True
                     )
+
+                    if self.updates % (self.ippo.log_every * 5) == 0:
+                        print(
+                            f"[SFL] iter={self.iterations:4d} | upd={self.updates:5d} | "
+                            f"steps={total_collected:9,} | mean_r={mean_r:6.2f} | "
+                            f"loss={log_loss:.4f} | buf_mean={log_buf_mean:.4f} | "
+                            f"deliv={self.total_deliveries} | sps={sps:.0f}"
+                        )
 
                 # --- Serialize periodic training checkpoints ---
                 if checkpoint_dir and checkpoint_every > 0 and self.updates % checkpoint_every == 0:

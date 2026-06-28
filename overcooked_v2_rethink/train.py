@@ -40,7 +40,7 @@ import jax.numpy as jnp
 from overcooked_v2_rethink import OvercookedV2, overcooked_v2_layouts
 from overcooked_v2_rethink.ippo_jax import IPPOTrainer
 from overcooked_v2_rethink.accel_trainer import ACCELTrainer
-from overcooked_v2_rethink.sfl_trainer import SFLTrainer
+from marl_master_thesis.overcooked_v2_rethink.sfl_trainer_backup import SFLTrainer
 
 # Default PPO hyperparameter configurations
 DEFAULT_CFG = {

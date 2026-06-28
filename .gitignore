@@ -58,8 +58,10 @@ cover/
 # Folders
 rl_experiments/
 Minesweeper/
+
 overcooked_v2_rebuild/
 overcooked_rethinking/
+results/
 
 
 # Translations
