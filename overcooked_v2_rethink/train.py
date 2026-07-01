@@ -12,6 +12,12 @@
 # --steps 5000000 \
 # --envs 16
 
+# JAX_PLATFORMS=cpu uv run --project overcooked_v2_rethink python train.py --layout cramped_room --sfl --sfl-pool-size 20 --sfl-inner-steps 50 --sfl-refresh-every 3
+
+# JAX_PLATFORMS=cpu uv run --project overcooked_v2_rethink python train.py --layout cramped_room --accel --accel-replay-prob 0.5 --accel-score-threshold 0.05 --accel-edit-step 0.1 --steps 5000000 --envs 16
+
+
+
 
 
 
@@ -40,7 +46,7 @@ import jax.numpy as jnp
 from overcooked_v2_rethink import OvercookedV2, overcooked_v2_layouts
 from overcooked_v2_rethink.ippo_jax import IPPOTrainer
 from overcooked_v2_rethink.accel_trainer import ACCELTrainer
-from marl_master_thesis.overcooked_v2_rethink.sfl_trainer_backup import SFLTrainer
+from overcooked_v2_rethink.sfl_trainer import SFLTrainer
 
 # Default PPO hyperparameter configurations
 DEFAULT_CFG = {
@@ -115,7 +121,7 @@ def plot_curves(
     is_curriculum: bool = False,
     curriculum_type: str = "accel"
 ):
-    """Save training metric curves (Mean Return, Loss, Deliveries, and ACCEL Buffer metrics)."""
+    """Save training metric curves (Mean Return, Loss, Deliveries, and curriculum buffer metrics for ACCEL/SFL)."""
     steps = [r["steps"] for r in log]
     mean_r = [r["mean_r"] for r in log]
     losses = [r["loss"] for r in log]
@@ -180,9 +186,13 @@ def plot_curves(
         buf_max = [r.get("buffer_max_score", 0.0) for r in log]
         
         if curriculum_type == "sfl":
-            ax_curriculum.plot(steps, buf_mean, lw=2, color="teal", label="Buffer Mean Learnability (p*(1-p))")
-            ax_curriculum.plot(steps, buf_max, lw=1.5, color="magenta", linestyle="--", label="Buffer Max Learnability")
-            ax_curriculum.set_ylabel("SFL Learnability Score")
+            buf_min     = [r.get("buffer_min_score", 0.0) for r in log]
+            level_score = [r.get("level_score", 0.0) for r in log]
+            ax_curriculum.scatter(steps, level_score, s=6, color="steelblue", alpha=0.4, label="level learn (per step)", zorder=2)
+            ax_curriculum.plot(steps, buf_mean, lw=2, color="teal", label="buf mean p*(1-p)")
+            ax_curriculum.plot(steps, buf_max, lw=1.5, color="magenta", linestyle="--", label="buf max")
+            ax_curriculum.plot(steps, buf_min, lw=1.0, color="gray", linestyle=":", label="buf min")
+            ax_curriculum.set_ylabel("SFL Learnability")
         else:
             ax_curriculum.plot(steps, buf_mean, lw=2, color="darkblue", label="Buffer Mean Regret (PVL)")
             ax_curriculum.plot(steps, buf_max, lw=1.5, color="crimson", linestyle="--", label="Buffer Max Regret")
@@ -225,7 +235,7 @@ def save_results(log, params_0, params_1, out_dir: Path, title: str, filename: s
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--layout", default="cramped_room_v2")
+    ap.add_argument("--layout", default=None, help="Layout name (required). For ACCEL/SFL this is the grid template (sets H×W and object counts); for plain IPPO it is the actual training layout.")
     ap.add_argument("--steps", type=int, default=DEFAULT_CFG["total_steps"])
     ap.add_argument("--envs", type=int, default=DEFAULT_CFG["n_envs"])
     ap.add_argument("--lr", type=float, default=DEFAULT_CFG["lr"])
@@ -264,6 +274,9 @@ def main():
         for name, layout in overcooked_v2_layouts.items():
             print(f"  {name:45s} {layout.height}×{layout.width}  {layout.num_ingredients} ingredient(s)")
         return
+
+    if args.layout is None:
+        ap.error("--layout is required. Run with --list-layouts to see available options.")
 
     initial_layout = args.layout
 

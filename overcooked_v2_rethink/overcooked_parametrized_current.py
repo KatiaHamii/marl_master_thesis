@@ -158,79 +158,80 @@ class EnvParams:
 def generate_random_layout(
     H: int,
     W: int,
-    params: EnvParams,
+    obstacles_left,   # float or JAX float scalar
+    obstacles_right,  # float or JAX float scalar
+    resources_left,   # float or JAX float scalar
+    resources_right,  # float or JAX float scalar
     key,
     num_agents: int = 2,
-    num_goals:  int = 2,
-    num_pots:   int = 2,
+    num_goals = 2,    # int or JAX int32 scalar
+    num_pots  = 2,    # int or JAX int32 scalar
     num_plates: int = 1,
-    ingredient_types: tuple = (INGREDIENT_0, INGREDIENT_1),
-) -> np.ndarray:
+    ing0: int = INGREDIENT_0,
+    ing1: int = INGREDIENT_0,
+) -> jnp.ndarray:
     """
-    Build a fully random layout within the density constraints.
-
-    Only H × W is fixed.  No border is forced — every cell is up for grabs.
-    Placement order:
-      1. Agents       → interior only (they must walk)
-      2. Obstacles    → interior only, left/right halves by density param
-      3. Ingredients  → any remaining cell, using only the types from the base
-      4. Goals / pots / plates → any remaining cell
-
-    ingredient_types controls which ingredient IDs appear (derived from the
-    base layout so e.g. cramped_room never spawns INGREDIENT_1).
+    JAX-compatible layout generator. Vmappable over (obstacles_*, resources_*, num_goals, num_pots, key).
+    H, W, num_agents, num_plates, ing0, ing1 must be static Python ints.
+    Returns (H, W) jnp.int32 grid with ParametrizedOvercooked codes.
     """
-    grid = np.full((H, W), EMPTY, dtype=np.int32)
-    occupied: set = set()
-    mid = W / 2
+    N = H * W
+    keys = jax.random.split(key, 12)
 
-    all_cells      = [(r, c) for r in range(H) for c in range(W)]
-    interior_cells = [(r, c) for r in range(H) for c in range(W)
-                      if 0 < r < H - 1 and 0 < c < W - 1]
+    grid = jnp.full(N, EMPTY, dtype=jnp.int32)
+    occ  = jnp.zeros(N, dtype=jnp.bool_)
 
-    keys = jax.random.split(key, 10)
+    # Static cell masks (constant for given H, W — folded as XLA constants in vmap)
+    r_idx = jnp.repeat(jnp.arange(H), W)
+    c_idx = jnp.tile(jnp.arange(W), H)
+    interior_flat  = (r_idx > 0) & (r_idx < H - 1) & (c_idx > 0) & (c_idx < W - 1)
+    left_flat      = c_idx < (W / 2.0)
+    right_flat     = ~left_flat
+    all_flat       = jnp.ones(N, dtype=jnp.bool_)
+    int_left_flat  = interior_flat & left_flat
+    int_right_flat = interior_flat & right_flat
 
-    def _place(pool, n, obj, rng_key):
-        if n <= 0 or not pool:
-            return
-        perm = np.array(jax.random.permutation(rng_key, len(pool)))
-        placed = 0
-        for i in perm:
-            if placed >= n:
-                break
-            r, c = pool[int(i)]
-            if (r, c) not in occupied:
-                grid[r, c] = obj
-                occupied.add((r, c))
-                placed += 1
+    def place(grid, occ, eligible_flat, n, obj, rng):
+        perm = jax.random.permutation(rng, N)
+
+        def _step(carry, idx):
+            g, o, cnt = carry
+            can = eligible_flat[idx] & ~o[idx] & (cnt < n)
+            g = g.at[idx].set(jnp.where(can, jnp.int32(obj), g[idx]))
+            o = o.at[idx].set(o[idx] | can)
+            cnt = cnt + can.astype(jnp.int32)
+            return (g, o, cnt), None
+
+        (grid, occ, _), _ = jax.lax.scan(_step, (grid, occ, jnp.int32(0)), perm)
+        return grid, occ
 
     # 1. Agents — interior only
-    k_agents = jax.random.split(keys[8], max(num_agents, 2))
-    for i, agent_obj in enumerate([AGENT_0, AGENT_1][:num_agents]):
-        _place([p for p in interior_cells if p not in occupied], 1, agent_obj, k_agents[i])
+    k_a0, k_a1 = jax.random.split(keys[8])
+    grid, occ = place(grid, occ, interior_flat, jnp.int32(1), AGENT_0, k_a0)
+    grid, occ = place(grid, occ, interior_flat, jnp.int32(1), AGENT_1, k_a1)
 
-    # 2. Walls (obstacles) — interior only, per half
-    int_left  = [p for p in interior_cells if p[1] <  mid and p not in occupied]
-    int_right = [p for p in interior_cells if p[1] >= mid and p not in occupied]
-    _place(int_left,  int(params.obstacles_left  * len(int_left)),  OBSTACLE, keys[0])
-    _place(int_right, int(params.obstacles_right * len(int_right)), OBSTACLE, keys[1])
+    # 2. Walls — interior halves
+    n_int_left   = jnp.sum(int_left_flat)
+    n_int_right  = jnp.sum(int_right_flat)
+    n_wall_left  = (obstacles_left  * n_int_left.astype(jnp.float32)).astype(jnp.int32)
+    n_wall_right = (obstacles_right * n_int_right.astype(jnp.float32)).astype(jnp.int32)
+    grid, occ = place(grid, occ, int_left_flat,  n_wall_left,  OBSTACLE, keys[0])
+    grid, occ = place(grid, occ, int_right_flat, n_wall_right, OBSTACLE, keys[1])
 
-    # 3. Ingredients — any cell, left→type[0], right→type[-1] (same if only one type)
-    ing_left  = ingredient_types[0]
-    ing_right = ingredient_types[-1]
-    rem_left  = [p for p in all_cells if p[1] <  mid and p not in occupied]
-    rem_right = [p for p in all_cells if p[1] >= mid and p not in occupied]
-    _place(rem_left,  int(params.resources_left  * len(rem_left)),  ing_left,  keys[2])
-    _place(rem_right, int(params.resources_right * len(rem_right)), ing_right, keys[3])
+    # 3. Ingredients — any cell, by half
+    n_left      = jnp.sum(left_flat)
+    n_right     = jnp.sum(right_flat)
+    n_ing_left  = (resources_left  * n_left.astype(jnp.float32)).astype(jnp.int32)
+    n_ing_right = (resources_right * n_right.astype(jnp.float32)).astype(jnp.int32)
+    grid, occ = place(grid, occ, left_flat,  n_ing_left,  ing0, keys[2])
+    grid, occ = place(grid, occ, right_flat, n_ing_right, ing1, keys[3])
 
-    # 4. Goals, pots, plate piles — any remaining cell
-    def _free():
-        return [p for p in all_cells if p not in occupied]
+    # 4. Goals, pots, plates — any remaining
+    grid, occ = place(grid, occ, all_flat, jnp.asarray(num_goals,  jnp.int32), GOAL,       keys[4])
+    grid, occ = place(grid, occ, all_flat, jnp.asarray(num_pots,   jnp.int32), POT,        keys[5])
+    grid, occ = place(grid, occ, all_flat, jnp.int32(num_plates),              PLATE_PILE, keys[6])
 
-    _place(_free(), num_goals,  GOAL,       keys[4])
-    _place(_free(), num_pots,   POT,        keys[5])
-    _place(_free(), num_plates, PLATE_PILE, keys[6])
-
-    return grid
+    return grid.reshape(H, W)
 
 
 
@@ -286,7 +287,7 @@ def compute_min_cycle(grid: np.ndarray) -> int:
     d4 = _bfs_min(plates,      frozenset({GOAL}))
     return d1 + d2 + d3 + d4
 
-def is_valid_layout(grid: np.ndarray) -> bool:
+def is_valid_layout(grid) -> bool:
     """
     Return True iff the layout is task-completable:
 
@@ -298,6 +299,7 @@ def is_valid_layout(grid: np.ndarray) -> bool:
     "Adjacently reachable" means BFS over walkable cells (EMPTY/AGENT) visits
     a cell that is a direct neighbor of the target object.
     """
+    grid = np.asarray(grid)  # accept JAX arrays too
     H, W = grid.shape
     walkable = {EMPTY, AGENT_0, AGENT_1}
 
@@ -548,9 +550,18 @@ class ParametrizedOvercooked:
     codes = GridCodes
 
     @staticmethod
-    def make_layout(H, W, params, key, **kwargs) -> np.ndarray:
-        """Alias for generate_random_layout — available without a separate import."""
-        return generate_random_layout(H, W, params, key, **kwargs)
+    def make_layout(H, W, params: "EnvParams", key, **kwargs) -> np.ndarray:
+        """Alias for generate_random_layout accepting an EnvParams object."""
+        ingredient_types = kwargs.pop("ingredient_types", (INGREDIENT_0,))
+        return generate_random_layout(
+            H, W,
+            params.obstacles_left, params.obstacles_right,
+            params.resources_left, params.resources_right,
+            key,
+            ing0=int(ingredient_types[0]),
+            ing1=int(ingredient_types[-1]),
+            **kwargs,
+        )
 
     @staticmethod
     def validate(grid: np.ndarray) -> bool:
@@ -594,15 +605,17 @@ class ParametrizedOvercooked:
     # ── internal: generate from a single JAX key ──────────────────────────────
 
     def _generate_from_key(self, candidate_key) -> Tuple[np.ndarray, "EnvParams"]:
-        """Deterministically produce a layout+params from one JAX key."""
+        """Python path: extracts concrete values, returns numpy grid for validation."""
         k_params, k_layout = jax.random.split(candidate_key)
         k_obs, k_res, k_ng, k_np = jax.random.split(k_params, 4)
 
+        obs_left  = float(jax.random.uniform(k_obs, minval=0.0, maxval=MAX_OBS_FRAC))
+        obs_right = float(jax.random.uniform(k_res, minval=0.0, maxval=MAX_OBS_FRAC))
+        res_left  = float(jax.random.uniform(k_ng,  minval=0.0, maxval=MAX_RES_FRAC))
+        res_right = float(jax.random.uniform(k_np,  minval=0.0, maxval=MAX_RES_FRAC))
         params = EnvParams(
-            obstacles_left=float(jax.random.uniform(k_obs, minval=0.0, maxval=MAX_OBS_FRAC)),
-            obstacles_right=float(jax.random.uniform(k_res, minval=0.0, maxval=MAX_OBS_FRAC)),
-            resources_left=float(jax.random.uniform(k_ng,  minval=0.0, maxval=MAX_RES_FRAC)),
-            resources_right=float(jax.random.uniform(k_np,  minval=0.0, maxval=MAX_RES_FRAC)),
+            obstacles_left=obs_left, obstacles_right=obs_right,
+            resources_left=res_left, resources_right=res_right,
         )
 
         k_ng2, k_np2 = jax.random.split(k_layout)
@@ -610,14 +623,44 @@ class ParametrizedOvercooked:
         num_pots  = int(jax.random.randint(k_np2, (), 1, max(self.num_pots, 1) + 1))
 
         grid = generate_random_layout(
-            self.H, self.W, params, k_layout,
+            self.H, self.W,
+            obs_left, obs_right, res_left, res_right,
+            k_layout,
             num_agents=self.num_agents,
             num_goals=num_goals,
             num_pots=num_pots,
             num_plates=self.num_plates,
-            ingredient_types=self.ingredient_types,
+            ing0=int(self.ingredient_types[0]),
+            ing1=int(self.ingredient_types[-1]),
         )
-        return grid, params
+        return np.asarray(grid), params
+
+    def _generate_from_key_jax(self, candidate_key) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        """JAX path: all values stay as JAX scalars. Vmappable. Returns (H,W) grid + 4-vec params."""
+        k_params, k_layout = jax.random.split(candidate_key)
+        k_obs, k_res, k_ng, k_np = jax.random.split(k_params, 4)
+
+        obs_left  = jax.random.uniform(k_obs, minval=0.0, maxval=float(MAX_OBS_FRAC))
+        obs_right = jax.random.uniform(k_res, minval=0.0, maxval=float(MAX_OBS_FRAC))
+        res_left  = jax.random.uniform(k_ng,  minval=0.0, maxval=float(MAX_RES_FRAC))
+        res_right = jax.random.uniform(k_np,  minval=0.0, maxval=float(MAX_RES_FRAC))
+
+        k_ng2, k_np2 = jax.random.split(k_layout)
+        num_goals = jax.random.randint(k_ng2, (), 1, self.max_goals + 1)
+        num_pots  = jax.random.randint(k_np2, (), 1, max(self.num_pots, 1) + 1)
+
+        grid = generate_random_layout(
+            self.H, self.W,
+            obs_left, obs_right, res_left, res_right,
+            k_layout,
+            num_agents=self.num_agents,
+            num_goals=num_goals,
+            num_pots=num_pots,
+            num_plates=self.num_plates,
+            ing0=int(self.ingredient_types[0]),
+            ing1=int(self.ingredient_types[-1]),
+        )
+        return grid, jnp.stack([obs_left, obs_right, res_left, res_right])
 
     # ── public API ────────────────────────────────────────────────────────────
 

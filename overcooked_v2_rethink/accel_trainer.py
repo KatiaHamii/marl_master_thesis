@@ -38,7 +38,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .common import StaticObject
-from .ippo_jax import IPPOTrainer, Transition, compute_gae
+from .ippo_jax import IPPOTrainer, Transition, calculate_gae
 from .overcooked_parametrized_current import EnvParams, ParametrizedOvercooked
 from .settings import DELIVERY_REWARD
 
@@ -156,11 +156,15 @@ class ACCELTrainer:
         self.rng                = np.random.default_rng(seed)
 
         # Diagnostics
-        self.iterations   = 0   
-        self.updates      = 0   
+        self.iterations   = 0
+        self.updates      = 0
         self.new_count    = 0
         self.replay_count = 0
         self.edit_count   = 0
+
+        # Env-parameter log: list of ([obs_left, obs_right, res_left, res_right], reset_id)
+        self.env_param_log: List[Tuple[List[float], int]] = []
+        self._reset_id: int = 0
 
     def _grid_to_layout(self, grid: np.ndarray):
         H, W = grid.shape
@@ -201,8 +205,8 @@ class ACCELTrainer:
         last_v0: jnp.ndarray,
         last_v1: jnp.ndarray,
     ) -> float:
-        adv0, _ = compute_gae(trs0, last_v0, self.ippo.gamma, self.ippo.lam)
-        adv1, _ = compute_gae(trs1, last_v1, self.ippo.gamma, self.ippo.lam)
+        adv0, _ = calculate_gae(trs0, last_v0, self.ippo.gamma, self.ippo.lam)
+        adv1, _ = calculate_gae(trs1, last_v1, self.ippo.gamma, self.ippo.lam)
         pvl0 = float(jnp.mean(jnp.maximum(adv0, 0.0)))
         pvl1 = float(jnp.mean(jnp.maximum(adv1, 0.0)))
         return (pvl0 + pvl1) / 2.0
@@ -247,14 +251,14 @@ class ACCELTrainer:
             k_ng, k_np = jax.random.split(k_layout)
             num_goals = int(jax.random.randint(k_ng, (), 1, self.param_env.max_goals + 1))
             num_pots  = int(jax.random.randint(k_np, (), 1, max(self.param_env.num_pots, 1) + 1))
-            grid = ParametrizedOvercooked.make_layout(
+            grid = np.asarray(ParametrizedOvercooked.make_layout(
                 self.param_env.H, self.param_env.W, new_params, k_layout,
                 num_agents=self.param_env.num_agents,
                 num_goals=num_goals,
                 num_pots=num_pots,
                 num_plates=self.param_env.num_plates,
                 ingredient_types=self.param_env.ingredient_types,
-            )
+            ))
             if ParametrizedOvercooked.validate(grid):
                 return Level(params=new_params, grid=grid), key
         return None, key
@@ -360,8 +364,8 @@ class ACCELTrainer:
 
                 # Bootstrap values using ending hidden states (nh0, nh1)
                 last_v0, last_v1 = self._bootstrap_values(ts0, ts1, next_obs, nh0, nh1)
-                adv0, ret0 = compute_gae(trs0, last_v0, self.ippo.gamma, self.ippo.lam)
-                adv1, ret1 = compute_gae(trs1, last_v1, self.ippo.gamma, self.ippo.lam)
+                adv0, ret0 = calculate_gae(trs0, last_v0, self.ippo.gamma, self.ippo.lam)
+                adv1, ret1 = calculate_gae(trs1, last_v1, self.ippo.gamma, self.ippo.lam)
 
                 # Update Flax TrainStates (Replaces immutable objects with optimized parameters)
                 key, ks0, ks1 = jax.random.split(key, 3)

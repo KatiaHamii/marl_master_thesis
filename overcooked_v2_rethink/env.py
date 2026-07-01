@@ -140,19 +140,23 @@ class OvercookedV2(MultiAgentEnv):
 
     # ------------------------------------------------------------------ reset
 
-    def reset(self, key: chex.PRNGKey) -> Tuple[Dict[str, chex.Array], State]:
-        static_objects = self.layout.static_objects
+    def reset(self, key: chex.PRNGKey, static_objects=None, agent_positions_xy=None) -> Tuple[Dict[str, chex.Array], State]:
+        so = self.layout.static_objects if static_objects is None else static_objects
         grid = jnp.stack(
             [
-                static_objects,
-                jnp.zeros_like(static_objects),
-                jnp.zeros_like(static_objects),
+                so,
+                jnp.zeros_like(so),
+                jnp.zeros_like(so),
             ],
             axis=-1,
             dtype=jnp.int32,
         )
 
-        xs, ys = map(jnp.array, zip(*self.layout.agent_positions))
+        if agent_positions_xy is None:
+            xs, ys = map(jnp.array, zip(*self.layout.agent_positions))
+        else:
+            xs = agent_positions_xy[:, 0]
+            ys = agent_positions_xy[:, 1]
         agents = Agent(
             pos=Position(x=xs, y=ys),
             dir=jnp.full((self.num_agents,), Direction.UP),

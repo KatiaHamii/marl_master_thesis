@@ -51,7 +51,7 @@ class Transition(NamedTuple):
 
 # ── GAE ─(Generalized Advantage Estimation)──────────────────────────────────────────────────────────────────────
 #  how good each action was.
-def compute_gae(
+def calculate_gae(
     transitions: Transition,
     last_value: jnp.ndarray,  # (n_envs,)
     gamma: float = 0.99,
@@ -581,8 +581,8 @@ class IPPOTrainer:
             last_v0 = _val(ts0, obs0_last, h0)  # (n_envs,)
             last_v1 = _val(ts1, obs1_last, h1)
 
-            adv0, ret0 = compute_gae(trs0, last_v0, self.gamma, self.lam)
-            adv1, ret1 = compute_gae(trs1, last_v1, self.gamma, self.lam)
+            adv0, ret0 = calculate_gae(trs0, last_v0, self.gamma, self.lam)
+            adv1, ret1 = calculate_gae(trs1, last_v1, self.gamma, self.lam)
 
             # Collect episode stats — record any completed episodes this rollout
             done_np = np.asarray(ep_dones)  # (T, n_envs) bool

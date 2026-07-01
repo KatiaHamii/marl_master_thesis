@@ -11,7 +11,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .common import StaticObject
-from .ippo_jax import IPPOTrainer, Transition, compute_gae
+from .ippo_jax import IPPOTrainer, Transition, calculate_gae
 from .overcooked_parametrized_current import EnvParams, ParametrizedOvercooked
 from .settings import DELIVERY_REWARD
 
@@ -273,8 +273,8 @@ class SFLTrainer:
 
                 # Calculate critic values and GAE advantages (PPO)
                 last_v0, last_v1 = self._bootstrap_values(ts0, ts1, next_obs, nh0, nh1)
-                adv0, ret0 = compute_gae(trs0, last_v0, self.ippo.gamma, self.ippo.lam)
-                adv1, ret1 = compute_gae(trs1, last_v1, self.ippo.gamma, self.ippo.lam)
+                adv0, ret0 = calculate_gae(trs0, last_v0, self.ippo.gamma, self.ippo.lam)
+                adv1, ret1 = calculate_gae(trs1, last_v1, self.ippo.gamma, self.ippo.lam)
 
                 # Perform optimization and policy parameter updates
                 key, ks0, ks1 = jax.random.split(key, 3)
