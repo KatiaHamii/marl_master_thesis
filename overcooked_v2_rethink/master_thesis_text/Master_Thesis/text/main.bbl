@@ -1,0 +1,162 @@
+\newcommand{\etalchar}[1]{$^{#1}$}
+\begin{thebibliography}{dWGM{\etalchar{+}}20}
+
+\bibitem[AS07]{aspn07}
+James Aspnes and Gauri Shah.
+\newblock Skip graphs.
+\newblock {\em ACM Trans. Algorithms}, 3(4):37, 2007.
+
+\bibitem[BKM{\etalchar{+}}19]{baker2020}
+Bowen Baker, Ingmar Kanitscheider, Todor Markov, Yi~Wu, Glenn Powell, Bob McGrew, and Igor Mordatch.
+\newblock Emergent tool use from multi-agent autocurricula, 09 2019.
+
+\bibitem[BLCW09]{bengio2009curriculum}
+Yoshua Bengio, J{\'e}r{\^o}me Louradour, Ronan Collobert, and Jason Weston.
+\newblock Curriculum learning.
+\newblock In {\em Proceedings of the 26th annual international conference on machine learning}, pages 41--48, 2009.
+
+\bibitem[CSH{\etalchar{+}}19]{Carroll2019}
+Micah Carroll, Rohin Shah, Mark~K. Ho, Thomas~L. Griffiths, Sanjit~A. Seshia, Pieter Abbeel, and Anca~D. Dragan.
+\newblock On the utility of learning about humans for human-ai coordination.
+\newblock {\em CoRR}, abs/1910.05789, 2019.
+
+\bibitem[DJV{\etalchar{+}}20]{dennis2020}
+Michael Dennis, Natasha Jaques, Eugene Vinitsky, Alexandre Bayen, Stuart Russell, Andrew Critch, and Sergey Levine.
+\newblock Emergent complexity and zero-shot transfer via unsupervised environment design.
+\newblock In {\em Proceedings of the 34th International Conference on Neural Information Processing Systems}, NIPS '20, Red Hook, NY, USA, 2020. Curran Associates Inc.
+
+\bibitem[dWGM{\etalchar{+}}20]{dewitt2020independentlearningneedstarcraft}
+Christian~Schroeder de~Witt, Tarun Gupta, Denys Makoviichuk, Viktor Makoviychuk, Philip H.~S. Torr, Mingfei Sun, and Shimon Whiteson.
+\newblock Is independent learning all you need in the starcraft multi-agent challenge?, 2020.
+
+\bibitem[Elm93]{elman1993learning}
+Jeffrey~L Elman.
+\newblock Learning and development in neural networks: The importance of starting small.
+\newblock {\em Cognition}, 48(1):71--99, 1993.
+
+\bibitem[FFA{\etalchar{+}}24]{foerster2024counterfactualmultiagentpolicygradients}
+Jakob Foerster, Gregory Farquhar, Triantafyllos Afouras, Nantas Nardelli, and Shimon Whiteson.
+\newblock Counterfactual multi-agent policy gradients, 2024.
+
+\bibitem[FHGA18]{florensa2018automatic}
+Carlos Florensa, David Held, Xinyang Geng, and Pieter Abbeel.
+\newblock Automatic goal generation for reinforcement learning agents.
+\newblock In {\em International conference on machine learning}, pages 1515--1528. PMLR, 2018.
+
+\bibitem[GDG{\etalchar{+}}24]{garcin2024dredzeroshottransferreinforcement}
+Samuel Garcin, James Doran, Shangmin Guo, Christopher~G. Lucas, and Stefano~V. Albrecht.
+\newblock Dred: Zero-shot transfer in reinforcement learning via data-regularised environment design, 2024.
+
+\bibitem[GEK17]{Gupta2017}
+Jayesh~K. Gupta, Maxim Egorov, and Mykel Kochenderfer.
+\newblock Cooperative multi-agent control using deep reinforcement learning.
+\newblock In Gita Sukthankar and Juan~A. Rodriguez-Aguilar, editors, {\em Autonomous Agents and Multiagent Systems}, pages 66--83, Cham, 2017. Springer International Publishing.
+
+\bibitem[HLPF21]{hu2021otherplayzeroshotcoordination}
+Hengyuan Hu, Adam Lerer, Alex Peysakhovich, and Jakob Foerster.
+\newblock "other-play" for zero-shot coordination, 2021.
+
+\bibitem[JDPH{\etalchar{+}}21]{jiang2021replay}
+Minqi Jiang, Michael Dennis, Jack Parker-Holder, Jakob Foerster, Edward Grefenstette, and Tim Rockt{\"a}schel.
+\newblock Replay-guided adversarial environment design.
+\newblock {\em Advances in Neural Information Processing Systems}, 34:1884--1897, 2021.
+
+\bibitem[JGR20]{JiangPLR2021}
+Minqi Jiang, Edward Grefenstette, and Tim Rockt{\"{a}}schel.
+\newblock Prioritized level replay.
+\newblock {\em CoRR}, abs/2010.03934, 2020.
+
+\bibitem[LWT{\etalchar{+}}17]{Lowe2017}
+Ryan Lowe, Yi~Wu, Aviv Tamar, Jean Harb, Pieter Abbeel, and Igor Mordatch.
+\newblock Multi-agent actor-critic for mixed cooperative-competitive environments.
+\newblock {\em CoRR}, abs/1706.02275, 2017.
+
+\bibitem[MLB{\etalchar{+}}25]{monette2025optimisationframeworkunsupervisedenvironment}
+Nathan Monette, Alistair Letcher, Michael Beukman, Matthew~T. Jackson, Alexander Rutherford, Alexander~D. Goldie, and Jakob~N. Foerster.
+\newblock An optimisation framework for unsupervised environment design, 2025.
+
+\bibitem[NPL{\etalchar{+}}20]{Narvekar2020CurriculumLearning}
+Sanmit Narvekar, Bei Peng, Matteo Leonetti, Jivko Sinapov, Matthew~E. Taylor, and Peter Stone.
+\newblock Curriculum learning for reinforcement learning domains: A framework and survey.
+\newblock {\em Journal of Machine Learning Research}, 21(181):1--50, 2020.
+
+\bibitem[OMRF25]{omari2025MACraftax}
+Bassel~Al Omari, Michael Matthews, Alexander Rutherford, and Jakob~Nicolaus Foerster.
+\newblock Multi-agent craftax: Benchmarking open-ended multi-agent reinforcement learning at the hyperscale, 2025.
+
+\bibitem[OSV08]{oliehoek2008optimal}
+Frans~A Oliehoek, Matthijs~TJ Spaan, and Nikos Vlassis.
+\newblock Optimal and approximate q-value functions for decentralized pomdps.
+\newblock {\em Journal of Artificial Intelligence Research}, 32:289--353, 2008.
+
+\bibitem[PCW{\etalchar{+}}20]{Portelas2020ACL}
+Rémy Portelas, Cédric Colas, Lilian Weng, Katja Hofmann, and Pierre-Yves Oudeyer.
+\newblock Automatic curriculum learning for deep rl: A short survey.
+\newblock In Christian Bessiere, editor, {\em Proceedings of the Twenty-Ninth International Joint Conference on Artificial Intelligence, {IJCAI-20}}, pages 4819--4825. International Joint Conferences on Artificial Intelligence Organization, 7 2020.
+\newblock Survey track.
+
+\bibitem[PHJD{\etalchar{+}}23]{parkerholder2023ACCEL}
+Jack Parker-Holder, Minqi Jiang, Michael Dennis, Mikayel Samvelyan, Jakob Foerster, Edward Grefenstette, and Tim Rocktäschel.
+\newblock Evolving curricula with regret-based environment design, 2023.
+
+\bibitem[RBPB25]{ruhdorfer2025overcookedgeneralisationchallengeevaluating}
+Constantin Ruhdorfer, Matteo Bortoletto, Anna Penzkofer, and Andreas Bulling.
+\newblock The overcooked generalisation challenge: Evaluating cooperation with novel partners in unknown environments using unsupervised environment design, 2025.
+
+\bibitem[RBW{\etalchar{+}}24]{rutherford2024sfl}
+Alexander Rutherford, Michael Beukman, Timon Willi, Bruno Lacerda, Nick Hawes, and Jakob Foerster.
+\newblock No regrets: Investigating and improving regret approximations for curriculum discovery, 2024.
+
+\bibitem[RP99]{rohde1999language}
+Douglas~LT Rohde and David~C Plaut.
+\newblock Language acquisition in the absence of explicit negative evidence: How important is starting small?
+\newblock {\em Cognition}, 72(1):67--109, 1999.
+
+\bibitem[RSdW{\etalchar{+}}18]{RashidQMIX2018}
+Tabish Rashid, Mikayel Samvelyan, Christian~Schr{\"{o}}der de~Witt, Gregory Farquhar, Jakob~N. Foerster, and Shimon Whiteson.
+\newblock {QMIX:} monotonic value function factorisation for deep multi-agent reinforcement learning.
+\newblock {\em CoRR}, abs/1803.11485, 2018.
+
+\bibitem[San94]{sanger1994neural}
+Terence~D Sanger.
+\newblock Neural network learning control of robot manipulators using gradually increasing task difficulty.
+\newblock {\em IEEE transactions on Robotics and Automation}, 10(3):323--333, 1994.
+
+\bibitem[SB18]{sutton2018reinforcement}
+R.S. Sutton and A.G. Barto.
+\newblock {\em Reinforcement Learning, second edition: An Introduction}.
+\newblock Adaptive Computation and Machine Learning series. MIT Press, 2018.
+
+\bibitem[SKD{\etalchar{+}}23]{samvelyan2023maestr}
+Mikayel Samvelyan, Akbir Khan, Michael Dennis, Minqi Jiang, Jack Parker-Holder, Jakob Foerster, Roberta Raileanu, and Tim Rocktäschel.
+\newblock Maestro: Open-ended environment design for multi-agent reinforcement learning, 2023.
+
+\bibitem[SKS{\etalchar{+}}19]{Sartoretti_2019}
+Guillaume Sartoretti, Justin Kerr, Yunfei Shi, Glenn Wagner, T.~K.~Satish Kumar, Sven Koenig, and Howie Choset.
+\newblock Primal: Pathfinding via reinforcement and imitation multi-agent learning.
+\newblock {\em IEEE Robotics and Automation Letters}, 4(3):2378–2385, July 2019.
+
+\bibitem[SLG{\etalchar{+}}17]{SunehagVDN2018}
+Peter Sunehag, Guy Lever, Audrunas Gruslys, Wojciech~Marian Czarnecki, Vin{\'{\i}}cius~Flores Zambaldi, Max Jaderberg, Marc Lanctot, Nicolas Sonnerat, Joel~Z. Leibo, Karl Tuyls, and Thore Graepel.
+\newblock Value-decomposition networks for cooperative multi-agent learning.
+\newblock {\em CoRR}, abs/1706.05296, 2017.
+
+\bibitem[SRdW{\etalchar{+}}19]{samvelyan2019starcraftmultiagentchallenge}
+Mikayel Samvelyan, Tabish Rashid, Christian~Schroeder de~Witt, Gregory Farquhar, Nantas Nardelli, Tim G.~J. Rudner, Chia-Man Hung, Philip H.~S. Torr, Jakob Foerster, and Shimon Whiteson.
+\newblock The starcraft multi-agent challenge, 2019.
+
+\bibitem[Tan93]{TanMARL1993}
+Ming Tan.
+\newblock Multi-agent reinforcement learning: independent versus cooperative agents.
+\newblock In {\em Proceedings of the Tenth International Conference on International Conference on Machine Learning}, ICML'93, page 330–337, San Francisco, CA, USA, 1993. Morgan Kaufmann Publishers Inc.
+
+\bibitem[TFR{\etalchar{+}}17]{tobin2017domainrandomizationtransferringdeep}
+Josh Tobin, Rachel Fong, Alex Ray, Jonas Schneider, Wojciech Zaremba, and Pieter Abbeel.
+\newblock Domain randomization for transferring deep neural networks from simulation to the real world, 2017.
+
+\bibitem[V{\etalchar{+}}11]{vygotsky2011interaction}
+Lev Vygotsky et~al.
+\newblock {\em Interaction between learning and development}.
+\newblock Link{\"o}pings universitet Link{\"o}ping, Sweden, 2011.
+
+\end{thebibliography}

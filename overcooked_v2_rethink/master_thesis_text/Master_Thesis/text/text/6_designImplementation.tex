@@ -1,0 +1,32 @@
+%\chapter{Environment Design \& Implementation}\label{sec:designImplementation}
+
+
+%This chapter should defines where to optimize (the environment, parameters, mutation operators) — \textbf{the domain}
+
+
+%\textbf{Describe the parameterized cooperative environment(s) $\rightarrow$ Overcooked, \url{https://minigrid.farama.org/environments/babyai/GoTo/},}
+
+%\begin{itemize}
+    %\item \textbf{the underspecified dimensions:}
+    %\begin{itemize}
+        %\item \textbf{Structural parameters:} Grid dimensions, wall placement (which cells are walls vs.\ open), room connectivity (number and position of doorways/passages). Layout encoding — as a 2D grid of tile types, a flattened vector, or an ASCII string.
+       % \item \textbf{Functional object placement:} Positions of pots, ingredient dispensers (onion, tomato, broccoli), plate dispensers, serving stations. These determine the task structure and which agent has natural access to which resource.
+        %\item \textbf{Agent configuration:} Start positions and orientations of agents. Optionally, view radius (controlling partial observability), allocation radius, field of view.
+        %\item \textbf{Task parameters (if applicable):} Recipe set, number of required ingredients per dish, episode length.
+   % \end{itemize}
+
+  %  \item \textbf{Level Generation and Mutation Operators}
+  %  \begin{itemize}
+  %      \item \textbf{(Random generation (for DR and PLR):} How are random valid layouts sampled? Uniform over tile types? Structured generation (place walls with some probability, then place objects)?
+  %      \item \textbf{Mutation operators:} What constitutes an ``edit'' to a level? Adding/removing a wall tile, moving a functional object, swapping two tiles, changing agent start positions.
+  %      \item \textbf{Difussion}
+  %  \end{itemize}
+
+  %  \item \textbf{and the technical infrastructure (likely JAX-based):}
+   % \begin{itemize}
+   %     \item \textbf{environment implementation:} JaxMARL's Overcooked (or your custom extension), JAX-based, compatible with \texttt{jit}/\texttt{vmap} for vectorized rollouts.
+    %    \item \textbf{UED pipeline:} JaxUED for PLR/ACCEL logic — level buffer, regret scoring, replay decisions, mutation.
+    %    \item \textbf{Training algorithm:} IPPO or MAPPO via JaxMARL, with parameter sharing.
+    %    \item \textbf{Integration:} How these components connect — the outer loop (sample/replay level $\rightarrow$ rollout with IPPO $\rightarrow$ compute regret score $\rightarrow$ update buffer $\rightarrow$ update policy) or similar.
+   % \end{itemize}
+%\end{itemize}

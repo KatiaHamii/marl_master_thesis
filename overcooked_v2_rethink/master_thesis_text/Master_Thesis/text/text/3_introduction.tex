@@ -1,0 +1,75 @@
+\chapter{Introduction}\label{sec:introduction}
+%
+%
+%\textbf{Motivation:}
+%\begin{itemize}
+%    \item The Generalization Problem in RL — and Why It Gets Harder with Multiple Agents: agents must not only generalize their individual behavior but also their coordination strategies. $\rightarrow$ generalization through environment variation
+%    
+%    \item Most cooperative MARL research trains agents in a small set of fixed, handcrafted environments $\rightarrow$ agents should be able to coordinate with each other (or with novel partners) across varying environmental conditions.
+%    
+%    \item The Practical Need — Agents That Cooperate in Unseen Situations
+%\end{itemize}
+%
+%\textbf{Problem Statement}
+%\textbf{The Formal Framework — Building on Existing Formalisms:} \\
+%MAESTRO extends this to the Underspecified Partially Observable Stochastic Game (UPOSG), adding multiple agents, joint actions, and individual observation/reward functions. Critically, MAESTRO applies this to competitive two-player zero-sum settings and introduces a joint curriculum over environments and co-players. $\rightarrow$ adapt this formalism to the cooperative setting
+%
+%
+%\textbf{The Underspecified Parameters — What Is Being Designed:}
+%\begin{itemize}
+%    \item Structural parameters: Layout topology (wall placement, room connectivity), positions of functional objects (e.g., pots, serving stations, ingredient sources in Overcooked), start positions of agents.
+%    \item Task parameters: Number and type of resources, recipe composition, number of goals or deliveries required.
+%    \item Observability parameters: Agent view radius, whether agents can see each other
+%    \item Cooperation-forcing parameters: Some layouts structurally require cooperation (e.g., one agent can reach the pot but not the serving station), while others can be solved independently.
+%\end{itemize}
+%
+%\textbf{Objective:} Find a joint policy that minimizes the maximum regret over the space of underspecified parameters $\Theta$, where regret is defined as the difference between the optimal team return and the achieved team return on a given environment configuration $\theta$. -> diff between env and RL
+%
+%
+%\textbf{Research Questions:}
+%\begin{itemize}
+%    \item[RQ1:] Transferability of UED to Cooperative MARL: Can single-agent UED methods (PLR, ACCEL) be applied to cooperative multi-agent environments, and what modifications to the regret formulation, level curation, and training procedure are required to maintain their curriculum-generating properties?
+%    
+%    \item[RQ2:] Emergence of Generalizable Cooperation: Does training under UED autocurricula lead to the emergence of cooperative behaviors — such as implicit role assignment and coordinated task execution — that generalize zero-shot to out-of-distribution environment configurations?
+%    
+%    \item[RQ3:] Effect of Parameter Choice on Cooperation Quality: How does the choice of underspecified environment parameters (layout structure, resource distribution, partial observability) affect the quality and robustness of learned cooperation?
+%\end{itemize}
+%
+%Vllt RQ2 \& RQ3 sind aenlich 
+%
+%\textbf{Contributions:} what my thesis will contribute to the research, what is actually new, insight or artifact that results from that work
+%\begin{itemize}
+%    \item maybe extending the UED formalism, algo adaptation (?), new parameterized env(?) \cite{}
+%\end{itemize}
+
+
+
+----------------------------------------------------------
+
+Agents need to work well with new partners even if they have never worked together before. This is called \textbf{zero-shot coordination (ZSC).}
+\textbf{Overcooked} is now one of the most commonly used benchmarks for measuring the coordination abilities of AI agents and learning algorithms.
+
+----------------------------------------------------------
+
+Modern approaches to reinforcement learning (RL) have made significant progress in solving complex decision-making problems, particularly in gaming environments, robotics and autonomous control systems. At the same time, a key limitation remains the poor generalisation ability of trained policies beyond the training distribution of environments. In most cases, agents demonstrate high performance in familiar scenarios but suffer a significant drop in performance when the task structure or environmental parameters change.
+
+This problem is particularly evident in complex multi-agent systems, where the successful completion of a task depends not only on individual strategies, but also on the agents’ ability to coordinate their actions. In cooperative environments, additional difficulties arise relating to the distribution of roles, partial observability, the ambiguity of optimal strategies, and the need to establish shared behavioural conventions. Under such conditions, even minor changes in the structure of the environment can lead to a significant disruption in coordination between agents.
+
+A particular challenge is the problem of generalisation in scenarios involving parameterised or variable environments. Most standard approaches to MARL assume a fixed environment structure during training, which limits the agents’ ability to adapt to new task configurations. This creates a mismatch between training conditions and real-world applications, where the environment is dynamic and partially unknown.
+
+In order to address these limitations, the Unsupervised Environment Design (UED) approach was proposed, which treats the generation of environments itself as part of the learning process. Instead of using a predefined set of tasks, UED automatically generates environments that adapt to the agent’s current level and stimulate its learning by progressively increasing the difficulty or adding variety to the scenarios. In the single-agent case, this approach has demonstrated the ability to significantly improve policy generalisation.
+
+In order to address these limitations, the Unsupervised Environment Design (UED) approach was proposed, which treats the generation of environments itself as part of the learning process. Instead of using a predefined set of tasks, UED automatically generates environments that adapt to the agent’s current level and stimulate its learning by progressively increasing the difficulty or adding variety to the scenarios. Unsupervised Environment Design approaches demonstrate improved generalisation to unseen environments compared to training on a fixed task distribution. \cite{dennis2020}
+
+At the same time, the application of UED in cooperative multi-agent systems remains under-researched. The main challenge lies in the fact that, in a MARL environment, it is necessary to consider both the individual learning of agents and the process of forming coordination strategies between them simultaneously. This complicates the design of the training curriculum, as changes in the environment can affect not only the complexity of the task but also the stability of interactions between agents.
+
+Furthermore, modern methods for the automatic generation of training scenarios, such as Prioritized Level Replay (PLR), ACCEL, Sampling for Learnability (SFL) and MAESTRO, have primarily been developed for single-agent or limited-cooperation settings. Their effectiveness in tasks where the emergence of complex coordination strategies in multi-agent environments is critical remains under-researched.
+
+In this context, parameterised cooperative environments are of particular interest, in which the structural characteristics of the task—such as the configuration of the space, the location of resources and the level of observability—can change during the learning process. Such environments allow for the systematic investigation of how changes in task structure affect the emergence of cooperation and agents’ ability to generalise.
+The aim of this master’s thesis is to investigate the applicability of Unsupervised Environment Design approaches in cooperative multi-agent environments with a parameterised structure, as well as to analyse their impact on the formation of generalisable cooperative behaviour in agents.
+
+
+Structure
+
+The thesis consists of an introduction, a theoretical review, a description of the methodology, an experimental section, an analysis of the results, and conclusions.
+The first chapter examines the fundamentals of reinforcement learning and multi-agent systems, including the formalisation of the problem and the issue of partial observability. The second chapter is devoted to methods of automatic environment generation and approaches to constructing training environments. The third chapter describes the proposed formulation of the problem and a parameterised environment for cooperation. The fourth chapter includes an experimental evaluation of the methods and an analysis of the results. The paper concludes with conclusions and possible directions for further research.
