@@ -587,6 +587,9 @@ class ParametrizedOvercooked:
         self.num_pots   = int((base_grid == POT).sum())
         self.num_plates = int((base_grid == PLATE_PILE).sum())
         self.max_goals  = self.num_agents + 2
+        self._max_pots    = self.num_pots
+        self._max_plates  = self.num_plates
+        self._dims_only   = False
 
         # Only use ingredient types present in the base (e.g. cramped_room has only INGREDIENT_0)
         self.ingredient_types = tuple(
@@ -597,10 +600,36 @@ class ParametrizedOvercooked:
         self.current_seed   = 0
         self._counter       = 0          # increments on every attempt
         self.grid = base_grid.copy()
-        
+
         # Curriculum learning parameters (allocation radius from CACTUS https://arxiv.org/abs/2401.05860)
-        self.curriculum   = curriculum 
+        self.curriculum   = curriculum
         self.cycle_range  = (min_cycle, max_cycle)
+
+    @classmethod
+    def from_dims(cls, H: int, W: int, seed: int = 42,
+                  max_pots: int = 3, max_goals: int = 3, max_plates: int = 2):
+        """Initialize using only grid dimensions — all object counts are randomized per level."""
+        obj = cls.__new__(cls)
+        obj.base_grid     = None
+        obj.H, obj.W      = H, W
+        obj.seed          = seed
+        obj.key           = jax.random.PRNGKey(seed)
+        obj.num_agents    = 2
+        obj.num_goals     = 1
+        obj.num_pots      = 1
+        obj.num_plates    = 1
+        obj.max_goals     = max_goals
+        obj._max_pots     = max_pots
+        obj._max_plates   = max_plates
+        obj._dims_only    = True
+        obj.ingredient_types = (INGREDIENT_0, INGREDIENT_1)
+        obj.current_params = EnvParams()
+        obj.current_seed  = 0
+        obj._counter      = 0
+        obj.grid          = None
+        obj.curriculum    = False
+        obj.cycle_range   = (0, 999)
+        return obj
 
     # ── internal: generate from a single JAX key ──────────────────────────────
 
@@ -618,9 +647,11 @@ class ParametrizedOvercooked:
             resources_left=res_left, resources_right=res_right,
         )
 
-        k_ng2, k_np2 = jax.random.split(k_layout)
-        num_goals = int(jax.random.randint(k_ng2, (), 1, self.max_goals + 1))
-        num_pots  = int(jax.random.randint(k_np2, (), 1, max(self.num_pots, 1) + 1))
+        k_ng2, k_np2, k_npl = jax.random.split(k_layout, 3)
+        num_goals  = int(jax.random.randint(k_ng2, (), 1, self.max_goals + 1))
+        num_pots   = int(jax.random.randint(k_np2, (), 1, self._max_pots + 1))
+        num_plates = int(jax.random.randint(k_npl, (), 1, self._max_plates + 1)) \
+                     if self._dims_only else self.num_plates
 
         grid = generate_random_layout(
             self.H, self.W,
@@ -629,7 +660,7 @@ class ParametrizedOvercooked:
             num_agents=self.num_agents,
             num_goals=num_goals,
             num_pots=num_pots,
-            num_plates=self.num_plates,
+            num_plates=num_plates,
             ing0=int(self.ingredient_types[0]),
             ing1=int(self.ingredient_types[-1]),
         )
@@ -647,7 +678,7 @@ class ParametrizedOvercooked:
 
         k_ng2, k_np2 = jax.random.split(k_layout)
         num_goals = jax.random.randint(k_ng2, (), 1, self.max_goals + 1)
-        num_pots  = jax.random.randint(k_np2, (), 1, max(self.num_pots, 1) + 1)
+        num_pots  = jax.random.randint(k_np2, (), 1, self._max_pots + 1)
 
         grid = generate_random_layout(
             self.H, self.W,
@@ -656,7 +687,7 @@ class ParametrizedOvercooked:
             num_agents=self.num_agents,
             num_goals=num_goals,
             num_pots=num_pots,
-            num_plates=self.num_plates,
+            num_plates=self.num_plates,  # static in JAX path; randomized in Python path
             ing0=int(self.ingredient_types[0]),
             ing1=int(self.ingredient_types[-1]),
         )

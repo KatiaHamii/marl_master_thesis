@@ -50,8 +50,8 @@ from overcooked_v2_rethink.sfl_trainer import SFLTrainer
 
 # Default PPO hyperparameter configurations
 DEFAULT_CFG = {
-    "n_envs": 16,
-    "rollout_len": 400,
+    "n_envs": 32,
+    "rollout_len": 800,
     "n_epochs": 4,
     "batch_size": 400,
     "lr": 1e-4,
@@ -166,11 +166,11 @@ def plot_curves(
     ax1.legend(loc="upper left", fontsize=8)
     ax1.grid(alpha=0.3)
 
-    # 2. Plot Optimization Loss (PPO Loss)
-    ax2.plot(steps, losses, lw=1.0, color="mediumpurple", label="PPO loss")
-    ax2.set_ylabel("Loss")
-    ax2.legend(loc="upper left", fontsize=8)
-    ax2.grid(alpha=0.3)
+    # # 2. Plot Optimization Loss (PPO Loss)
+    # ax2.plot(steps, losses, lw=1.0, color="mediumpurple", label="PPO loss")
+    # ax2.set_ylabel("Loss")
+    # ax2.legend(loc="upper left", fontsize=8)
+    # ax2.grid(alpha=0.3)
 
     # 3. Plot Task Deliveries 
     if ax_deliv is not None:
@@ -188,7 +188,7 @@ def plot_curves(
         if curriculum_type == "sfl":
             buf_min     = [r.get("buffer_min_score", 0.0) for r in log]
             level_score = [r.get("level_score", 0.0) for r in log]
-            ax_curriculum.scatter(steps, level_score, s=6, color="steelblue", alpha=0.4, label="level learn (per step)", zorder=2)
+            #ax_curriculum.scatter(steps, level_score, s=6, color="steelblue", alpha=0.4)
             ax_curriculum.plot(steps, buf_mean, lw=2, color="teal", label="buf mean p*(1-p)")
             ax_curriculum.plot(steps, buf_max, lw=1.5, color="magenta", linestyle="--", label="buf max")
             ax_curriculum.plot(steps, buf_min, lw=1.0, color="gray", linestyle=":", label="buf min")
@@ -235,7 +235,8 @@ def save_results(log, params_0, params_1, out_dir: Path, title: str, filename: s
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--layout", default=None, help="Layout name (required). For ACCEL/SFL this is the grid template (sets H×W and object counts); for plain IPPO it is the actual training layout.")
+    ap.add_argument("--layout", default=None, help="Layout name for plain IPPO training (required when not using --accel/--sfl). Run --list-layouts to see options.")
+    ap.add_argument("--grid-size", default=None, metavar="HxW", help="Grid dimensions for ACCEL/SFL level generation (e.g. 5x9). Required when using --accel or --sfl.")
     ap.add_argument("--steps", type=int, default=DEFAULT_CFG["total_steps"])
     ap.add_argument("--envs", type=int, default=DEFAULT_CFG["n_envs"])
     ap.add_argument("--lr", type=float, default=DEFAULT_CFG["lr"])
@@ -245,7 +246,7 @@ def main():
     ap.add_argument("--obs-mode", default="rich", choices=["rich", "simple"])
     ap.add_argument("--shaped", type=float, default=DEFAULT_CFG["shaped_reward_scale"])
     ap.add_argument("--view-size", type=int, default=None)
-    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--checkpoint-every", type=int, default=100)
     ap.add_argument("--load-checkpoint", default=None)
     ap.add_argument("--policy", default="ippo")
@@ -264,8 +265,8 @@ def main():
     ap.add_argument("--sfl", action="store_true", help="Use Sampling For Learnability curriculum")
     ap.add_argument("--sfl-buffer-size", type=int, default=50, help="Buffer capacity K")
     ap.add_argument("--sfl-pool-size", type=int, default=200, help="Random candidate pool size N")
-    ap.add_argument("--sfl-rho", type=float, default=0.7, help="Ratio of buffer levels in training batch")
-    ap.add_argument("--sfl-inner-steps", type=int, default=10, help="Inner training steps T per buffer update")
+    ap.add_argument("--sfl-rho", type=float, default=0.5, help="Ratio of buffer levels in training batch")
+    ap.add_argument("--sfl-inner-steps", type=int, default=50, help="Inner training steps T per buffer update")
     ap.add_argument("--sfl-refresh-every", type=int, default=1, help="Refresh buffer only every N outer iterations (reduces eval overhead)")
     
     args = ap.parse_args()
@@ -275,15 +276,20 @@ def main():
             print(f"  {name:45s} {layout.height}×{layout.width}  {layout.num_ingredients} ingredient(s)")
         return
 
-    if args.layout is None:
-        ap.error("--layout is required. Run with --list-layouts to see available options.")
+    if args.accel or args.sfl:
+        if args.grid_size is None:
+            ap.error("--grid-size HxW is required for ACCEL/SFL (e.g. --grid-size 5x9).")
+        try:
+            _h, _w = (int(x) for x in args.grid_size.lower().split("x"))
+        except ValueError:
+            ap.error("--grid-size must be in HxW format, e.g. 5x9.")
+        grid_size = (_h, _w)
+    else:
+        if args.layout is None:
+            ap.error("--layout is required for plain IPPO. Run with --list-layouts to see options.")
+        grid_size = None
 
-    initial_layout = args.layout
-
-    # ACCEL automatically enforces partial observability (view_size = 2) if not specified
-    #if args.accel and args.view_size is None:
-    #    args.view_size = 2  
-
+    # cfg / env setup
     cfg = {
         **DEFAULT_CFG,
         "total_steps": args.steps,
@@ -296,7 +302,24 @@ def main():
         "shaped_reward_scale": args.shaped,
     }
 
-    env = OvercookedV2(layout=initial_layout, max_steps=400, agent_view_size=args.view_size)
+    if args.accel or args.sfl:
+        # Build a minimal valid Layout of the right size so OvercookedV2 computes
+        # the correct obs_shape. ACCEL/SFL overwrite static_objects before every reset.
+        from overcooked_v2_rethink.layouts import Layout
+        from overcooked_v2_rethink.common import StaticObject
+        _static = np.full((_h, _w), int(StaticObject.WALL), dtype=int)
+        _static[1:_h-1, 1:_w-1] = int(StaticObject.EMPTY)
+        _dummy_layout = Layout(
+            agent_positions=[(1, 1), (_w - 2, _h - 2)],
+            static_objects=_static,
+            num_ingredients=2,
+            possible_recipes=[[0, 0, 0], [1, 1, 1]],
+        )
+        env = OvercookedV2(layout=_dummy_layout, max_steps=400, agent_view_size=args.view_size)
+        initial_layout = f"{_h}x{_w}"
+    else:
+        env = OvercookedV2(layout=args.layout, max_steps=400, agent_view_size=args.view_size)
+        initial_layout = args.layout
 
     # Checkpoint loading and state restoration logic
     resume_params = None
@@ -329,21 +352,17 @@ def main():
     samples_per_update = cfg["n_envs"] * cfg["rollout_len"]
     png_name = f"training_curve_{_fmt_steps(args.steps)}_{cfg['n_envs']}env_{samples_per_update}spu.png"
 
-    # Trainer Initialization: Branch between ACCEL and standard IPPO
+    # Trainer Initialization
     if args.accel:
-        from overcooked_v2_rethink.overcooked_parametrized_current import _LAYOUTS as _raw_layouts
-        _base_layout_str = _raw_layouts.get(args.layout)
         trainer = ACCELTrainer(
-            env, cfg, base_layout_str=_base_layout_str,
+            env, cfg, grid_size=grid_size,
             buffer_size=args.accel_buffer_size, initial_fill_ratio=args.accel_fill_ratio,
             replay_prob=args.accel_replay_prob, score_threshold=args.accel_score_threshold,
             edit_step=args.accel_edit_step, seed=args.seed
         )
     elif args.sfl:
-        from overcooked_v2_rethink.overcooked_parametrized_current import _LAYOUTS as _raw_layouts
-        _base_layout_str = _raw_layouts.get(args.layout)
         trainer = SFLTrainer(
-            env=env, cfg=cfg, base_layout_str=_base_layout_str,
+            env=env, cfg=cfg, grid_size=grid_size,
             buffer_size=args.sfl_buffer_size, n_random_pool=args.sfl_pool_size,
             rho=args.sfl_rho, seed=args.seed,
             buffer_refresh_every=args.sfl_refresh_every,

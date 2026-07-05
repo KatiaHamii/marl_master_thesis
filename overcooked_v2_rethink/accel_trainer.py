@@ -63,9 +63,10 @@ _TO_STATIC = {
 @dataclass
 class Level:
     """A single curriculum level stored in the ACCEL buffer."""
-    params: EnvParams       # 4-parameter density encoding (for editing)
-    grid:   np.ndarray      # H×W numpy grid in ParametrizedOvercooked format
-    score:  float = 0.0     # PVL regret score (higher = more learnable)
+    params:      EnvParams    # 4-parameter density encoding (for editing)
+    grid:        np.ndarray   # H×W numpy grid in ParametrizedOvercooked format
+    score:       float = 0.0  # PVL regret score (higher = more learnable)
+    gen_counter: int   = -1   # param_env._counter used to generate this level (-1 for edits)
 
 
 # ── Level buffer ───────────────────────────────────────────────────────────────
@@ -120,7 +121,7 @@ class ACCELTrainer:
         self,
         env,
         cfg: dict,
-        base_layout_str: str,
+        grid_size: Tuple[int, int],
         buffer_size: int = 100,
         initial_fill_ratio: float = 0.5,
         replay_prob: float = 0.1,
@@ -145,8 +146,7 @@ class ACCELTrainer:
             )
             self.ippo.rollout_len = env.max_steps
 
-        base_grid        = ParametrizedOvercooked.from_string(base_layout_str)
-        self.param_env   = ParametrizedOvercooked(base_grid=base_grid, seed=seed)
+        self.param_env   = ParametrizedOvercooked.from_dims(*grid_size, seed=seed)
         self.buffer      = LevelBuffer(capacity=buffer_size, score_threshold=score_threshold)
 
         self.initial_fill_ratio = initial_fill_ratio
@@ -165,6 +165,25 @@ class ACCELTrainer:
         # Env-parameter log: list of ([obs_left, obs_right, res_left, res_right], reset_id)
         self.env_param_log: List[Tuple[List[float], int]] = []
         self._reset_id: int = 0
+
+    def _log_reset(self, level: "Level", branch: str, step: int,
+                   writer=None) -> None:
+        p = level.params
+        vec = [p.obstacles_left, p.obstacles_right, p.resources_left, p.resources_right]
+        rid = self._reset_id
+        self.env_param_log.append((vec, rid, level.grid.copy(), level.gen_counter))
+        self._reset_id += 1
+        if writer is not None:
+            writer.writerow({
+                "reset_id":   rid,
+                "step":       step,
+                "branch":     branch,
+                "gen_counter": level.gen_counter,
+                "obs_left":   f"{vec[0]:.4f}",
+                "obs_right":  f"{vec[1]:.4f}",
+                "res_left":   f"{vec[2]:.4f}",
+                "res_right":  f"{vec[3]:.4f}",
+            })
 
     def _grid_to_layout(self, grid: np.ndarray):
         H, W = grid.shape
@@ -234,7 +253,7 @@ class ACCELTrainer:
             )
             grid, params = self.param_env._generate_from_key(ckey)
             if ParametrizedOvercooked.validate(grid):
-                return Level(params=params, grid=grid), key
+                return Level(params=params, grid=grid, gen_counter=self.param_env._counter), key
         return None, key
 
     def _edit_level(self, level: Level, key: jnp.ndarray) -> Tuple[Optional[Level], jnp.ndarray]:
@@ -287,6 +306,8 @@ class ACCELTrainer:
         # IO Logging setup
         episode_log_file   = None
         episode_log_writer = None
+        env_param_log_file   = None
+        env_param_log_writer = None
         if checkpoint_dir:
             ep_log_path = Path(checkpoint_dir) / "episodes.csv"
             ep_log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -297,6 +318,15 @@ class ACCELTrainer:
             )
             episode_log_writer.writeheader()
             episode_log_file.flush()
+
+            ep_log_path = Path(checkpoint_dir) / "env_params.csv"
+            env_param_log_file   = open(ep_log_path, "w", newline="")
+            env_param_log_writer = csv.DictWriter(
+                env_param_log_file,
+                fieldnames=["reset_id", "step", "branch", "gen_counter", "obs_left", "obs_right", "res_left", "res_right"],
+            )
+            env_param_log_writer.writeheader()
+            env_param_log_file.flush()
 
             ckpt_root = Path(checkpoint_dir) / "checkpoints"
             ckpt_root.mkdir(parents=True, exist_ok=True)
@@ -311,6 +341,7 @@ class ACCELTrainer:
                 continue
             pvl, key = self._score_level(ts0, ts1, level.grid, key)
             level.score = pvl # Positive Value Loss / Regret
+            self._log_reset(level, "buffer_init", total_collected, env_param_log_writer)
             if self.buffer.add(level):
                 curr_len = len(self.buffer)
                 if curr_len % max(1, n_initial // 5) == 0 or curr_len == n_initial:
@@ -337,6 +368,7 @@ class ACCELTrainer:
 
                 pvl, key   = self._score_level(ts0, ts1, level.grid, key)
                 level.score = pvl
+                self._log_reset(level, "new", total_collected, env_param_log_writer)
                 self.buffer.add(level)
                 self.new_count   += 1
                 total_collected  += steps_per_rollout
@@ -354,6 +386,7 @@ class ACCELTrainer:
                 self._set_env_layout(level.grid)
 
                 # Collect full rollout on θ
+                self._log_reset(level, "replay", total_collected, env_param_log_writer)
                 obs_dict, env_states, h0, h1, key = self._fresh_reset(key)
                 key, k_r = jax.random.split(key)
                 (trs0, trs1, (next_obs, _), (nh0, nh1),
@@ -382,6 +415,7 @@ class ACCELTrainer:
                 if edited_level is not None:
                     pvl_e, key    = self._score_level(ts0, ts1, edited_level.grid, key)
                     edited_level.score = pvl_e
+                    self._log_reset(edited_level, "edit", total_collected, env_param_log_writer)
                     if self.buffer.add(edited_level):
                         self.edit_count += 1
                     log_level_score = pvl_e
@@ -499,6 +533,11 @@ class ACCELTrainer:
 
         if episode_log_file:
             episode_log_file.close()
+        if env_param_log_file:
+            env_param_log_file.close()
+        if checkpoint_dir:
+            with open(Path(checkpoint_dir) / "env_params.pkl", "wb") as f:
+                pickle.dump(self.env_param_log, f)
 
         print(
             f"\n[ACCEL] Done: {self.updates} policy updates, "

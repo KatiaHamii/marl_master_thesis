@@ -52,9 +52,10 @@ def _extract_agent_pos_jax(grid_hw: jnp.ndarray) -> jnp.ndarray:
 @dataclass
 class Level:
     """Dataclass to store a curriculum level within the SFL buffer."""
-    params: EnvParams
-    grid:   np.ndarray
-    score:  float = 0.0     # Learnability score: p * (1 - p)
+    params:      EnvParams
+    grid:        np.ndarray
+    score:       float = 0.0  # Learnability score: p * (1 - p)
+    gen_counter: int   = -1   # param_env._counter used to generate this level
 
 
 class SFLTrainer:
@@ -64,10 +65,10 @@ class SFLTrainer:
         self,
         env,
         cfg: dict,
-        base_layout_str: str,
-        buffer_size: int = 50,         # K (buffer D capacity)
-        n_random_pool: int = 200,      # N (random pool size for evaluation)
-        rho: float = 0.7,              # Mixing coefficient for levels "ro"
+        grid_size: Tuple[int, int],
+        buffer_size: int = 100,         # K (buffer D capacity)
+        n_random_pool: int = 400,      # N (random pool size for evaluation)
+        rho: float = 0.5,              # Mixing coefficient for levels "ro"
         seed: int = 42,
         buffer_refresh_every: int = 1, # Refresh buffer only every N outer iterations
     ):
@@ -79,8 +80,7 @@ class SFLTrainer:
         if self.ippo.rollout_len < env.max_steps:
             self.ippo.rollout_len = env.max_steps
 
-        base_grid        = ParametrizedOvercooked.from_string(base_layout_str)
-        self.param_env   = ParametrizedOvercooked(base_grid=base_grid, seed=seed)
+        self.param_env   = ParametrizedOvercooked.from_dims(*grid_size, seed=seed)
         
         self.buffer_capacity = buffer_size
         self.buffer: List[Level] = []
@@ -95,8 +95,31 @@ class SFLTrainer:
         self.updates          = 0
         self.total_deliveries = 0
 
+        # Env-parameter log: list of ([obs_left, obs_right, res_left, res_right], reset_id)
+        self.env_param_log: List[Tuple[List[float], int]] = []
+        self._reset_id: int = 0
+
         # JIT-compiled level evaluator — compiled once, reused for all N levels
         self._jit_eval_level = self._make_jit_eval()
+
+    def _log_reset(self, level: "Level", branch: str, step: int,
+                   writer=None) -> None:
+        p = level.params
+        vec = [p.obstacles_left, p.obstacles_right, p.resources_left, p.resources_right]
+        rid = self._reset_id
+        self.env_param_log.append((vec, rid, level.grid.copy(), level.gen_counter))
+        self._reset_id += 1
+        if writer is not None:
+            writer.writerow({
+                "reset_id":    rid,
+                "step":        step,
+                "branch":      branch,
+                "gen_counter": level.gen_counter,
+                "obs_left":    f"{vec[0]:.4f}",
+                "obs_right":   f"{vec[1]:.4f}",
+                "res_left":    f"{vec[2]:.4f}",
+                "res_right":   f"{vec[3]:.4f}",
+            })
 
     def _make_jit_eval(self):
         """Build a JIT-compiled closure for single-level learnability evaluation.
@@ -224,7 +247,7 @@ class SFLTrainer:
             ckey = jax.random.fold_in(jax.random.PRNGKey(self.param_env.seed), self.param_env._counter)
             grid, params = self.param_env._generate_from_key(ckey)
             if ParametrizedOvercooked.validate(grid):
-                return Level(params=params, grid=grid), key
+                return Level(params=params, grid=grid, gen_counter=self.param_env._counter), key
         return None, key
 
     # ── JAX NATIVE ACCELERATED ALGORITHM 2 ─────────────────────────────────────
@@ -305,6 +328,8 @@ class SFLTrainer:
         # IO File logging setup
         episode_log_file = None
         episode_log_writer = None
+        env_param_log_file   = None
+        env_param_log_writer = None
         if checkpoint_dir:
             ep_log_path = Path(checkpoint_dir) / "episodes.csv"
             ep_log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -319,6 +344,15 @@ class SFLTrainer:
             )
             episode_log_writer.writeheader()
             episode_log_file.flush()
+
+            ep_log_path = Path(checkpoint_dir) / "env_params.csv"
+            env_param_log_file   = open(ep_log_path, "w", newline="")
+            env_param_log_writer = csv.DictWriter(
+                env_param_log_file,
+                fieldnames=["reset_id", "step", "branch", "gen_counter", "obs_left", "obs_right", "res_left", "res_right"],
+            )
+            env_param_log_writer.writeheader()
+            env_param_log_file.flush()
 
         print(f"[SFL] Main training loop activated (Target: {total_target:,} steps)\n")
 
@@ -347,13 +381,16 @@ class SFLTrainer:
                 n_buffer_levels = int(self.rho * N_L) # 1. D_t <- \rho * N_L levels sampled uniformly from D
                 n_random_levels = N_L - n_buffer_levels # 2. D_t <- D_t U (1 - \rho) * N_L randomly generated levels
                 
-                batch_grids = []
-                
+                batch_grids  = []
+                batch_params = []
+
                 # Sample from Buffer D
                 if len(self.buffer) > 0 and n_buffer_levels > 0:
                     # Uniformly sample with replacement (in case buffer < n_buffer_levels)
                     sampled_indices = np.random.choice(len(self.buffer), size=n_buffer_levels, replace=True)
-                    batch_grids.extend([self.buffer[i].grid for i in sampled_indices])
+                    for i in sampled_indices:
+                        batch_grids.append(self.buffer[i].grid)
+                        batch_params.append(self.buffer[i])  # full Level for logging
                 else:
                     # Fallback if buffer is empty on very first iterations
                     n_random_levels = N_L
@@ -363,9 +400,12 @@ class SFLTrainer:
                     level, key = self._generate_level(key)
                     if level is not None:
                         batch_grids.append(level.grid)
+                        batch_params.append(level)  # full Level for logging
                     else:
                         # Fallback for generation failure (append a dummy/zero grid)
-                        batch_grids.append(self.buffer[0].grid if self.buffer else np.zeros_like(batch_grids[0]))
+                        fallback = self.buffer[0] if self.buffer else batch_params[0]
+                        batch_grids.append(fallback.grid)
+                        batch_params.append(fallback)
 
                 # Stack into a batched array of shape (N_L, H, W)
                 D_t_grids = np.stack(batch_grids)
@@ -378,6 +418,8 @@ class SFLTrainer:
 
                 # --- Collect pi's trajectory on D_t and update phi ---
                 obs_dict, env_states, h0, h1, key = self._fresh_reset(key, batched_static_objs, batched_agent_pos)
+                for lv in batch_params:
+                    self._log_reset(lv, "train", total_collected, env_param_log_writer)
                 key, k_r = jax.random.split(key)
                 
                 (trs0, trs1, (next_obs, _), (nh0, nh1),
@@ -464,8 +506,7 @@ class SFLTrainer:
                         f"buf_mean={log_buf_mean:.4f} | "
                         f"buf_max={log_buf_max:.4f} | "
                         f"deliv={self.total_deliveries} | "
-                        f"sps={sps:.0f}| "
-                        f"learnability_score={self.buf_scores}| ",
+                        f"sps={sps:.0f}| " , 
                         flush=True
                     )
 
@@ -498,6 +539,11 @@ class SFLTrainer:
 
         if episode_log_file:
             episode_log_file.close()
+        if env_param_log_file:
+            env_param_log_file.close()
+        if checkpoint_dir:
+            with open(Path(checkpoint_dir) / "env_params.pkl", "wb") as f:
+                pickle.dump(self.env_param_log, f)
 
         print(f"\n[SFL] Training pipeline execution completed. Steps reached: {total_collected:,}")
         return ts0, ts1, log
