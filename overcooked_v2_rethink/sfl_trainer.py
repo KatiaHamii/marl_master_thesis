@@ -12,7 +12,8 @@ import numpy as np
 
 from .common import StaticObject
 from .ippo_jax import IPPOTrainer, Transition, calculate_gae
-from .overcooked_parametrized_current import EnvParams, ParametrizedOvercooked
+#from .overcooked_parametrized_current import EnvParams, ParametrizedOvercooked
+from .overcooked_parametrized_new import EnvParams, ParametrizedOvercooked
 from .settings import DELIVERY_REWARD
 
 # Grid codes mapping configuration
@@ -35,6 +36,78 @@ _STATIC_LOOKUP = jnp.array(
     [_TO_STATIC.get(i, int(StaticObject.EMPTY)) for i in range(_MAX_GRID_CODE)],
     dtype=jnp.int32,
 )
+
+
+def _save_layout_snapshot(grid: np.ndarray, step: int, out_dir: Path) -> None:
+    from .overcooked_parametrized_new import render_env as _render_env
+    snap_dir = out_dir / "layout_snapshots"
+    snap_dir.mkdir(exist_ok=True)
+    img = _render_env(grid, tile_size=48)
+    img.save(snap_dir / f"step_{step:09d}.png")
+
+
+def _save_agent_gif(grid: np.ndarray, network, params_0, params_1,
+                    step: int, out_dir: Path, max_steps: int = 200) -> None:
+    import imageio
+    from .layouts import Layout
+    from .env import OvercookedV2
+    from .viz.overcooked_v2_visualizer import OvercookedV2Visualizer
+
+    H, W = grid.shape
+    static_objects = np.vectorize(lambda c: _TO_STATIC.get(int(c), 0))(grid).astype(int)
+    agent_positions = []
+    for code in (_G.AGENT_0, _G.AGENT_1):
+        rows, cols = np.where(grid == code)
+        if len(rows):
+            r, c = int(rows[0]), int(cols[0])
+            agent_positions.append((c, r))
+            static_objects[r, c] = int(StaticObject.EMPTY)
+    if len(agent_positions) < 2:
+        for r in range(1, H - 1):
+            for c in range(1, W - 1):
+                if static_objects[r, c] == int(StaticObject.EMPTY) and (c, r) not in agent_positions:
+                    agent_positions.append((c, r))
+                if len(agent_positions) == 2:
+                    break
+            if len(agent_positions) == 2:
+                break
+
+    layout = Layout(agent_positions=agent_positions, static_objects=static_objects,
+                    num_ingredients=2, possible_recipes=[[0, 0, 0], [1, 1, 1]])
+    env = OvercookedV2(layout=layout, max_steps=max_steps)
+
+    key = jax.random.PRNGKey(step % 100000)
+    key, k_reset = jax.random.split(key)
+    obs, state = env.reset(k_reset)
+    states = [state]
+    step_deliveries = [0]
+    deliveries = 0
+
+    @jax.jit
+    def _act(params, single_obs):
+        logits, _ = network.apply(params, single_obs[None])
+        return jnp.argmax(logits[0])
+
+    for _ in range(max_steps):
+        key, k_step = jax.random.split(key)
+        a0 = _act(params_0, obs["agent_0"])
+        a1 = _act(params_1, obs["agent_1"])
+        obs, state, _, dones, _ = env.step_env(k_step, state, {"agent_0": a0, "agent_1": a1})
+        deliveries += int(state.new_correct_delivery)
+        states.append(state)
+        step_deliveries.append(deliveries)
+        if dones["__all__"]:
+            break
+
+    viz = OvercookedV2Visualizer(tile_size=64)
+    state_seq = jax.tree_util.tree_map(lambda *xs: jnp.stack(xs), *states)
+    frame_seq = np.array(viz.render_sequence(state_seq), dtype=np.uint8)
+
+    gif_dir = out_dir / "agent_gifs"
+    gif_dir.mkdir(exist_ok=True)
+    imageio.mimsave(str(gif_dir / f"step_{step:09d}.gif"), frame_seq,
+                    format="GIF", duration=150, loop=0)
+    print(f"[SFL] GIF saved: step={step:,}  deliveries={deliveries}", flush=True)
 
 
 def _extract_agent_pos_jax(grid_hw: jnp.ndarray) -> jnp.ndarray:
@@ -66,8 +139,8 @@ class SFLTrainer:
         env,
         cfg: dict,
         grid_size: Tuple[int, int],
-        buffer_size: int = 100,         # K (buffer D capacity)
-        n_random_pool: int = 400,      # N (random pool size for evaluation)
+        buffer_size: int = 50,         # K (buffer D capacity)
+        n_random_pool: int = 200,      # N (random pool size for evaluation)
         rho: float = 0.5,              # Mixing coefficient for levels "ro"
         seed: int = 42,
         buffer_refresh_every: int = 1, # Refresh buffer only every N outer iterations
@@ -105,7 +178,7 @@ class SFLTrainer:
     def _log_reset(self, level: "Level", branch: str, step: int,
                    writer=None) -> None:
         p = level.params
-        vec = [p.obstacles_left, p.obstacles_right, p.resources_left, p.resources_right]
+        vec = [p.obs_density, p.obs_skew_x, p.res_density, p.res_skew_x]
         rid = self._reset_id
         self.env_param_log.append((vec, rid, level.grid.copy(), level.gen_counter))
         self._reset_id += 1
@@ -115,10 +188,10 @@ class SFLTrainer:
                 "step":        step,
                 "branch":      branch,
                 "gen_counter": level.gen_counter,
-                "obs_left":    f"{vec[0]:.4f}",
-                "obs_right":   f"{vec[1]:.4f}",
-                "res_left":    f"{vec[2]:.4f}",
-                "res_right":   f"{vec[3]:.4f}",
+                "obs_density": f"{vec[0]:.4f}",
+                "obs_skew_x":  f"{vec[1]:.4f}",
+                "res_density": f"{vec[2]:.4f}",
+                "res_skew_x":  f"{vec[3]:.4f}",
             })
 
     def _make_jit_eval(self):
@@ -291,10 +364,10 @@ class SFLTrainer:
         for i in range(self.n_random_pool):
             p_vec = params_vecs_np[i]
             params = EnvParams(
-                obstacles_left=float(p_vec[0]),
-                obstacles_right=float(p_vec[1]),
-                resources_left=float(p_vec[2]),
-                resources_right=float(p_vec[3]),
+                obs_density=float(p_vec[0]),
+                obs_skew_x=float(p_vec[1]),
+                res_density=float(p_vec[2]),
+                res_skew_x=float(p_vec[3]),
             )
             levels.append(Level(params=params, grid=grids_np[i], score=scores[i]))
 
@@ -311,6 +384,7 @@ class SFLTrainer:
         checkpoint_dir=None,
         checkpoint_every: int = 100,
         T_steps: int = 10,
+        render_every: int = 0,
     ) -> Tuple:
         # Initialize student policy TrainStates
         key, k_init = jax.random.split(key)
@@ -349,7 +423,7 @@ class SFLTrainer:
             env_param_log_file   = open(ep_log_path, "w", newline="")
             env_param_log_writer = csv.DictWriter(
                 env_param_log_file,
-                fieldnames=["reset_id", "step", "branch", "gen_counter", "obs_left", "obs_right", "res_left", "res_right"],
+                fieldnames=["reset_id", "step", "branch", "gen_counter", "obs_density", "obs_skew_x", "res_density", "res_skew_x"],
             )
             env_param_log_writer.writeheader()
             env_param_log_file.flush()
@@ -506,9 +580,25 @@ class SFLTrainer:
                         f"buf_mean={log_buf_mean:.4f} | "
                         f"buf_max={log_buf_max:.4f} | "
                         f"deliv={self.total_deliveries} | "
-                        f"sps={sps:.0f}| " , 
+                        f"sps={sps:.0f}| " ,
                         flush=True
                     )
+
+                    # --- Layout snapshot (PNG) every log_every ---
+                    if checkpoint_dir and batch_params:
+                        _save_layout_snapshot(
+                            batch_params[0].grid, total_collected, Path(checkpoint_dir)
+                        )
+
+                # --- Agent GIF every render_every steps ---
+                if render_every > 0 and checkpoint_dir and batch_params:
+                    prev = total_collected - steps_per_rollout
+                    if total_collected // render_every > prev // render_every:
+                        _save_agent_gif(
+                            batch_params[0].grid,
+                            self.ippo.network, ts0.params, ts1.params,
+                            total_collected, Path(checkpoint_dir),
+                        )
 
                 # --- Serialize periodic checkpoints ---
                 # (Same logic as before)

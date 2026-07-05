@@ -13,9 +13,55 @@ import jax.numpy as jnp
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from overcooked_v2_rethink import OvercookedV2
+from overcooked_v2_rethink import OvercookedV2, Layout, StaticObject
 from overcooked_v2_rethink.networks import ActorCritic
+from overcooked_v2_rethink.utils import compute_enclosed_spaces
 from overcooked_v2_rethink.viz.overcooked_v2_visualizer import OvercookedV2Visualizer
+
+# GridCodes (from overcooked_parametrized_new) → StaticObject int
+_GRID_TO_STATIC = {
+    0:  int(StaticObject.EMPTY),             # EMPTY
+    2:  int(StaticObject.EMPTY),             # AGENT_0 (dynamic)
+    3:  int(StaticObject.EMPTY),             # AGENT_1 (dynamic)
+    4:  int(StaticObject.GOAL),              # GOAL
+    5:  int(StaticObject.POT),               # POT
+    8:  int(StaticObject.WALL),              # OBSTACLE
+    9:  int(StaticObject.PLATE_PILE),        # PLATE_PILE
+    10: int(StaticObject.INGREDIENT_PILE_BASE) + 0,  # INGREDIENT_0
+    11: int(StaticObject.INGREDIENT_PILE_BASE) + 1,  # INGREDIENT_1
+}
+
+def _grid_to_env(grid: np.ndarray, max_steps: int = 400) -> OvercookedV2:
+    """Convert a saved numpy grid (GridCodes) into a ready-to-use OvercookedV2 env."""
+    H, W = grid.shape
+    static_objects = np.vectorize(lambda c: _GRID_TO_STATIC.get(int(c), 0))(grid).astype(int)
+
+    agent_positions = []
+    for code in (2, 3):  # AGENT_0, AGENT_1
+        rows, cols = np.where(grid == code)
+        if len(rows):
+            r, c = int(rows[0]), int(cols[0])
+            agent_positions.append((c, r))  # Layout uses (x=col, y=row)
+            static_objects[r, c] = int(StaticObject.EMPTY)
+
+    if len(agent_positions) < 2:
+        # fallback: place agents at first two empty interior cells
+        for r in range(1, H - 1):
+            for c in range(1, W - 1):
+                if static_objects[r, c] == int(StaticObject.EMPTY) and (c, r) not in agent_positions:
+                    agent_positions.append((c, r))
+                if len(agent_positions) == 2:
+                    break
+            if len(agent_positions) == 2:
+                break
+
+    layout = Layout(
+        agent_positions=agent_positions,
+        static_objects=static_objects,
+        num_ingredients=2,
+        possible_recipes=[[0, 0, 0], [1, 1, 1]],
+    )
+    return OvercookedV2(layout=layout, max_steps=max_steps)
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -386,26 +432,127 @@ def render(results_dir: Path, layout: str, greedy: bool = True, seed: int = 0, f
         plt.show(block=True)
 
 
+def render_from_pkl(
+    results_dir: Path,
+    reset_id: int = None,
+    index: int = 0,
+    greedy: bool = True,
+    seed: int = 0,
+    fps: int = 5,
+    show_window: bool = True,
+    max_steps: int = 400,
+):
+    """Render an episode on a specific env saved in env_params.pkl."""
+    pkl_path = results_dir / "env_params.pkl"
+    if not pkl_path.exists():
+        raise FileNotFoundError(f"No env_params.pkl in {results_dir}")
+
+    with open(pkl_path, "rb") as f:
+        log = pickle.load(f)  # list of (vec, reset_id, grid, gen_counter)
+
+    if reset_id is not None:
+        matches = [(i, entry) for i, entry in enumerate(log) if entry[1] == reset_id]
+        if not matches:
+            raise ValueError(f"reset_id={reset_id} not found in pkl ({len(log)} entries)")
+        idx, (vec, rid, grid, gc) = matches[0]
+        print(f"[PKL] Found reset_id={rid} at pkl index {idx}  gen_counter={gc}")
+    else:
+        if index >= len(log):
+            raise ValueError(f"index={index} out of range (pkl has {len(log)} entries)")
+        vec, rid, grid, gc = log[index]
+        print(f"[PKL] Using index={index}  reset_id={rid}  gen_counter={gc}")
+
+    print(f"[PKL] Grid shape: {grid.shape}  vec={np.round(vec, 3)}")
+
+    env = _grid_to_env(grid, max_steps=max_steps)
+    params_0, params_1 = _load_params(results_dir)
+    network = ActorCritic(n_actions=env.num_actions, obs_mode="rich")
+    key = jax.random.PRNGKey(seed)
+
+    print("[RENDER] Running episode...")
+    states, obs_list, step_deliveries, ep_info = run_episode(env, params_0, params_1, network, key, greedy=greedy)
+    print(f"[RESULT] Steps: {ep_info['steps']} | Deliveries: {ep_info['deliveries']} | Reward: {ep_info['reward']:.2f}")
+
+    print("[RENDER] Generating frames...")
+    viz = OvercookedV2Visualizer(tile_size=64)
+    state_seq = _stack_states(states)
+    frame_seq = np.array(viz.render_sequence(state_seq), dtype=np.uint8)
+
+    annotated_frames = [
+        _annotate(frame, step, ep_info["steps"], deliv)
+        for step, (frame, deliv) in enumerate(zip(frame_seq, step_deliveries))
+    ]
+
+    tag = "greedy" if greedy else "stochastic"
+    gif_path = results_dir / f"pkl_rid{rid}_{tag}_seed{seed}.gif"
+    png_path = results_dir / f"pkl_rid{rid}_{tag}_seed{seed}.png"
+
+    imageio.mimsave(str(gif_path), annotated_frames, format="GIF", duration=int(1000 / fps), loop=0)
+    imageio.imwrite(str(png_path), annotated_frames[0])
+    print(f"[SAVED] GIF : {gif_path}")
+    print(f"[SAVED] PNG : {png_path}")
+
+    if show_window:
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(6, 6))
+        plt.ion()
+        plt.show()
+        im = ax.imshow(annotated_frames[0])
+        ax.axis("off")
+        fig.tight_layout()
+        for frame in annotated_frames:
+            im.set_data(frame)
+            plt.draw()
+            plt.pause(1.0 / fps)
+        plt.ioff()
+        plt.title("Finished! Close window to exit.")
+        plt.show(block=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Render trained OvercookedV2 IPPO agents.")
     ap.add_argument("--results", required=True, help="Path to results folder containing params_agent0/1.pkl")
-    ap.add_argument("--layout", default="cramped_room_v2")
-    ap.add_argument("--stochastic", action="store_true", help="Sample actions stochastically instead of argmax")
-    ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--fps", type=int, default=5, help="Playback speed")
-    ap.add_argument("--no-window", action="store_true", help="Skip live window playback")
-    ap.add_argument("--obs-every", type=int, default=0, help="Save snapshot of channels every N steps (0=off)")
+
+    # ── Mode A: fixed named layout ──────────────────────────────────────
+    ap.add_argument("--layout", default=None, help="Named layout (plain IPPO runs)")
+
+    # ── Mode B: env from env_params.pkl ────────────────────────────────
+    ap.add_argument("--from-pkl", action="store_true", help="Load env from env_params.pkl instead of --layout")
+    ap.add_argument("--reset-id", type=int, default=None, help="Select env by reset_id from CSV/pkl")
+    ap.add_argument("--index",    type=int, default=0,    help="Select env by position in pkl list (0-indexed)")
+
+    # ── Shared ──────────────────────────────────────────────────────────
+    ap.add_argument("--stochastic", action="store_true")
+    ap.add_argument("--seed",       type=int, default=0)
+    ap.add_argument("--fps",        type=int, default=5)
+    ap.add_argument("--no-window",  action="store_true")
+    ap.add_argument("--obs-every",  type=int, default=0)
+    ap.add_argument("--max-steps",  type=int, default=400)
     args = ap.parse_args()
 
-    render(
-        results_dir=Path(args.results),
-        layout=args.layout,
-        greedy=not args.stochastic,
-        seed=args.seed,
-        fps=args.fps,
-        show_window=not args.no_window,
-        obs_every=args.obs_every
-    )
+    if args.from_pkl:
+        render_from_pkl(
+            results_dir=Path(args.results),
+            reset_id=args.reset_id,
+            index=args.index,
+            greedy=not args.stochastic,
+            seed=args.seed,
+            fps=args.fps,
+            show_window=not args.no_window,
+            max_steps=args.max_steps,
+        )
+    else:
+        if args.layout is None:
+            ap.error("--layout is required unless --from-pkl is set")
+        render(
+            results_dir=Path(args.results),
+            layout=args.layout,
+            greedy=not args.stochastic,
+            seed=args.seed,
+            fps=args.fps,
+            show_window=not args.no_window,
+            obs_every=args.obs_every,
+        )
 
 if __name__ == "__main__":
     main()

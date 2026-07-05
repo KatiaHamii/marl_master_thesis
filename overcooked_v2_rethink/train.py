@@ -131,8 +131,8 @@ def plot_curves(
     has_deliveries = "total_deliveries" in log[0]
 
     # Calculate subplots and layout structure based on flags
-    n_rows = 2
-    height_ratios = [3, 2]
+    n_rows = 1
+    height_ratios = [3]
     if has_deliveries:
         n_rows += 1
         height_ratios.append(1.5)
@@ -144,17 +144,17 @@ def plot_curves(
         height_ratios.append(0.7)
 
     fig, axes = plt.subplots(n_rows, 1, figsize=(10, sum(height_ratios) * 1.3), gridspec_kw={"height_ratios": height_ratios})
+    if n_rows == 1:
+        axes = [axes]
 
     ax1 = axes[0]
-    ax2 = axes[1]
-    
-    axis_idx = 2
+    axis_idx = 1
     ax_deliv = axes[axis_idx] if has_deliveries else None
     if has_deliveries: axis_idx += 1
-    
+
     ax_curriculum = axes[axis_idx] if is_curriculum else None
     if is_curriculum: axis_idx += 1
-    
+
     ax_hp = axes[axis_idx] if has_hparams else None
 
     # 1. Plot Reward (Mean Return)
@@ -166,16 +166,11 @@ def plot_curves(
     ax1.legend(loc="upper left", fontsize=8)
     ax1.grid(alpha=0.3)
 
-    # # 2. Plot Optimization Loss (PPO Loss)
-    # ax2.plot(steps, losses, lw=1.0, color="mediumpurple", label="PPO loss")
-    # ax2.set_ylabel("Loss")
-    # ax2.legend(loc="upper left", fontsize=8)
-    # ax2.grid(alpha=0.3)
-
     # 3. Plot Task Deliveries 
     if ax_deliv is not None:
         deliveries_per_update = [0] + [deliveries[i] - deliveries[i - 1] for i in range(1, len(deliveries))]
-        ax_deliv.bar(steps, deliveries_per_update, width=max(steps) * 0.015, color="green", alpha=0.7, label="deliveries per update")
+        bar_width = (steps[-1] - steps[0]) / max(len(steps), 1) * 0.8 if len(steps) > 1 else steps[0] * 0.8
+        ax_deliv.bar(steps, deliveries_per_update, width=bar_width, color="green", alpha=0.7, label="deliveries per update")
         ax_deliv.set_ylabel("Deliveries / Update")
         ax_deliv.legend(loc="upper left", fontsize=8)
         ax_deliv.grid(alpha=0.3, axis="y")
@@ -248,6 +243,7 @@ def main():
     ap.add_argument("--view-size", type=int, default=None)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--checkpoint-every", type=int, default=100)
+    ap.add_argument("--render-every", type=int, default=50000, metavar="STEPS", help="Save layout PNG + agent GIF every N env steps during SFL training (0=off)")
     ap.add_argument("--load-checkpoint", default=None)
     ap.add_argument("--policy", default="ippo")
     ap.add_argument("--out-dir", default=str(Path(__file__).parent / "results"))
@@ -263,10 +259,10 @@ def main():
     
     # SFL arguments 
     ap.add_argument("--sfl", action="store_true", help="Use Sampling For Learnability curriculum")
-    ap.add_argument("--sfl-buffer-size", type=int, default=50, help="Buffer capacity K")
-    ap.add_argument("--sfl-pool-size", type=int, default=200, help="Random candidate pool size N")
+    ap.add_argument("--sfl-buffer-size", type=int, default=25, help="Buffer capacity K")
+    ap.add_argument("--sfl-pool-size", type=int, default=100, help="Random candidate pool size N")
     ap.add_argument("--sfl-rho", type=float, default=0.5, help="Ratio of buffer levels in training batch")
-    ap.add_argument("--sfl-inner-steps", type=int, default=50, help="Inner training steps T per buffer update")
+    ap.add_argument("--sfl-inner-steps", type=int, default=25, help="Inner training steps T per buffer update")
     ap.add_argument("--sfl-refresh-every", type=int, default=1, help="Refresh buffer only every N outer iterations (reduces eval overhead)")
     
     args = ap.parse_args()
@@ -436,6 +432,7 @@ def main():
     # For SFL, add the SFL-specific named parameter T for the inner loop.   
     if args.sfl:
         train_kwargs["T_steps"] = args.sfl_inner_steps
+        train_kwargs["render_every"] = args.render_every
 
     # Launch training pipeline with explicit keyword arguments mapping
     ts0, ts1, log = trainer.train(**train_kwargs)
