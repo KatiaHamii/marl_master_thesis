@@ -144,7 +144,7 @@ class LevelGenerator:
         self.width = width
         
     def create_level_elements(self, obs_density, obs_skew_x, res_density, res_skew_x, seed=None):
-        print(f"Creating level elements with obs_density={obs_density}, obs_skew_x={obs_skew_x}, res_density={res_density}, res_skew_x={res_skew_x}, seed={seed}")
+        # print(f"Creating level elements with obs_density={obs_density}, obs_skew_x={obs_skew_x}, res_density={res_density}, res_skew_x={res_skew_x}, seed={seed}")
         if seed is not None:
             np.random.seed(seed)
             random.seed(seed)
@@ -245,12 +245,12 @@ class LevelGenerator:
                 rec_res_frac = (actual_extra / remaining_space) if remaining_space > 0 else 0.0
 
                 # Print the final successful summary ONCE per layout generation
-                print(
-                    f"[Success] Valid layout found on trial {trial + 1}/{max_trials}. "
-                    f"Obstacles: {current_obstacles} (relaxed from {target_obstacles}) | "
-                    f"Final Density: {rec_obs_frac:.3f}. "
-                    f"Recommended MAX_OBS_FRAC: {rec_obs_frac:.3f}, MAX_RES_FRAC: {rec_res_frac:.3f}"
-                )
+                # print(
+                #     f"[Success] Valid layout found on trial {trial + 1}/{max_trials}. "
+                #     f"Obstacles: {current_obstacles} (relaxed from {target_obstacles}) | "
+                #     f"Final Density: {rec_obs_frac:.3f}. "
+                #     f"Recommended MAX_OBS_FRAC: {rec_obs_frac:.3f}, MAX_RES_FRAC: {rec_res_frac:.3f}"
+                # )
                 # Update the elements dictionary to reflect actual placed values for dashboard rendering
                 level_elems["num_obstacles"] = current_obstacles
                 level_elems["num_extra_resources"] = actual_extra

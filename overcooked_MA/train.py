@@ -32,9 +32,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from environment.environment import OvercookedEnvironment
-from environment.generator import LevelGenerator
-from .algorithms import SFLTrainer, ACCELTrainer
+from algorithms.simple_sfl import SimpleSFLTrainer
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -186,26 +184,17 @@ def main():
     ap.add_argument("--sfl-rho", type=float, default=0.5)
     ap.add_argument("--sfl-inner-steps", type=int, default=25)
     ap.add_argument("--sfl-refresh-every", type=int, default=1)
+    ap.add_argument("--sfl-rollouts-per-level", type=int, default=4)
+    ap.add_argument("--episode-len", type=int, default=150)
     
     # ACCEL arguments
-    ap.add_argument("--accel", action="store_true", help="Use ACCEL curriculum")
-    ap.add_argument("--accel-buffer-size", type=int, default=100)
-    ap.add_argument("--accel-fill-ratio", type=float, default=0.5)
-    ap.add_argument("--accel-replay-prob", type=float, default=0.5)
-    ap.add_argument("--accel-score-threshold", type=float, default=0.05)
-    ap.add_argument("--accel-edit-step", type=float, default=0.1)
+    # ap.add_argument("--accel", action="store_true", help="Use ACCEL curriculum")
+    # ap.add_argument("--accel-buffer-size", type=int, default=100)
+    # ap.add_argument("--accel-fill-ratio", type=float, default=0.5)
+    # ap.add_argument("--accel-replay-prob", type=float, default=0.5)
+    # ap.add_argument("--accel-score-threshold", type=float, default=0.05)
+    # ap.add_argument("--accel-edit-step", type=float, default=0.1)
     
-    # Evolutionary SFL arguments
-    ap.add_argument("--evosfl", action="store_true", help="Use Evolutionary SFL (MAP-Elites)")
-    ap.add_argument("--evosfl-mutation-ratio", type=float, default=0.5)
-    ap.add_argument("--evosfl-rho", type=float, default=0.3)
-    ap.add_argument("--evosfl-wall-bins", type=int, default=5)
-    ap.add_argument("--evosfl-pot-bins", type=int, default=4)
-    ap.add_argument("--evosfl-n-mutations", type=int, default=3)
-    ap.add_argument("--evosfl-disable-forced-exploration", action="store_true",
-                     help="Disable biasing candidate generation toward empty niches "
-                          "(fall back to fully unbiased random obs_density/num_pots every iteration)")
-
     args = ap.parse_args()
 
     # if args.list_layouts:
@@ -236,16 +225,8 @@ def main():
     }
 
     # ── Environment setup ─────────────────────────────────────────────────
-    if is_curriculum:
-        ued = LevelGenerator(height=_h, width=_w)
-        env = ued.env
-        initial_layout = f"Parametrized_{_h}x{_w}"
-        if args.accel:
-            policy_name, curriculum_type = "accel", "accel"
-        elif args.evosfl:
-            policy_name, curriculum_type = "evosfl", "evosfl"
-        else:
-            policy_name, curriculum_type = "sfl", "sfl"
+    initial_layout = f"Parametrized_{_h}x{_w}"
+    policy_name, curriculum_type = "sfl", "sfl"
 
     # ── Checkpoint loading ────────────────────────────────────────────────
     resume_params = None
@@ -255,9 +236,7 @@ def main():
         if (ckpt / "checkpoints").exists():
             ckpt = ckpt / "checkpoints" / "final" if (ckpt / "checkpoints" / "final").exists() \
                 else sorted((ckpt / "checkpoints").glob("update_*"), key=lambda p: int(p.name.split("_")[-1]))[-1]
-        with open(ckpt / "params_agent0.pkl", "rb") as f: p0 = pickle.load(f)
-        with open(ckpt / "params_agent1.pkl", "rb") as f: p1 = pickle.load(f)
-        resume_params = {"agent_0": p0, "agent_1": p1}
+        with open(ckpt / "params.pkl", "rb") as f: resume_params = pickle.load(f)
         resume_tag = f"_resumed"
 
     # ── Output path ───────────────────────────────────────────────────────
@@ -266,72 +245,58 @@ def main():
     title = f"OvercookedV2 {policy_name.upper()} — {layout_tag} ({obs_tag}, {args.reward_mode}, {args.obs_mode})"
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     out = Path(args.out_dir) / policy_name / f"{layout_tag}_{obs_tag}_{args.reward_mode}_{args.obs_mode}" / f"{timestamp}{resume_tag}"
-    spu = cfg["n_envs"] * cfg["rollout_len"]
-    png = f"training_curve_{_fmt_steps(args.steps)}_{cfg['n_envs']}env_{spu}spu.png"
+    batch_size = args.envs
+    spu = batch_size * args.episode_len * 2  # 2 agents per level
+    png = f"training_curve_{_fmt_steps(args.steps)}_{batch_size}env_{spu}spu.png"
 
     # ── Trainer ───────────────────────────────────────────────────────────
-    if args.sfl:
-        trainer = SFLTrainer(
-            env=env, cfg=cfg, grid_size=grid_size,
-            buffer_size=args.sfl_buffer_size, n_random_pool=args.sfl_pool_size,
-            rho=args.sfl_rho, seed=args.seed,
-            buffer_refresh_every=args.sfl_refresh_every,
-        )
-    elif args.accel:
-        trainer = ACCELTrainer(
-            env=env, cfg=cfg, grid_size=grid_size,
-            buffer_size=args.accel_buffer_size,
-            initial_fill_ratio=args.accel_fill_ratio,
-            replay_prob=args.accel_replay_prob,
-            score_threshold=args.accel_score_threshold,
-            edit_step=args.accel_edit_step,
-            seed=args.seed,                                                
-)  
+    trainer = SimpleSFLTrainer(
+        height=_h, width=_w, cfg=cfg,
+        buffer_size=args.sfl_buffer_size, pool_size=args.sfl_pool_size,
+        rho=args.sfl_rho, rollouts_per_level=args.sfl_rollouts_per_level,
+        episode_len=args.episode_len, refresh_every=args.sfl_refresh_every,
+        seed=args.seed,
+    )
+    env = trainer.env
+
     # ── Save config ───────────────────────────────────────────────────────
     out.mkdir(parents=True, exist_ok=True)
     with open(out / "run_config.json", "w") as f:
         json.dump({
             "timestamp": timestamp, "policy": policy_name, "layout": initial_layout,
-            "env_height": getattr(env, 'H', getattr(env, 'height', 0)),
-            "env_width": getattr(env, 'W', getattr(env, 'width', 0)),
+            "env_height": env.height, "env_width": env.width,
             "obs_shape": list(env.obs_shape), "seed": args.seed,
             **cfg,
-            "sfl_buffer_size": args.sfl_buffer_size if args.sfl else None,
-            "sfl_pool_size": args.sfl_pool_size if args.sfl else None,
-            "sfl_rho": args.sfl_rho if args.sfl else None,
-            "sfl_inner_steps": args.sfl_inner_steps if args.sfl else None,
+            "sfl_buffer_size": args.sfl_buffer_size,
+            "sfl_pool_size": args.sfl_pool_size,
+            "sfl_rho": args.sfl_rho,
+            "sfl_rollouts_per_level": args.sfl_rollouts_per_level,
+            "episode_len": args.episode_len,
         }, f, indent=2)
 
     # ── Print config ──────────────────────────────────────────────────────
     print(f"\n{'='*50}")
     print(f"Layout  : {initial_layout}  obs={env.obs_shape}")
     print(f"Reward  : {args.reward_mode}  obs_mode={args.obs_mode}")
-    print(f"Envs    : {cfg['n_envs']}  rollout={cfg['rollout_len']}  → {spu:,} spu")
-    print(f"PPO     : lr={cfg['lr']}  ent={cfg['ent_coef']}  epochs={cfg['n_epochs']}")
-    print(f"Total   : {args.steps:,} steps  (~{args.steps // spu} updates)")
+    print(f"Envs    : {batch_size} levels/update  episode_len={args.episode_len}  → {spu:,} spu")
+    print(f"PPO     : lr={cfg['lr']}  ent={cfg['ent_coef']}")
+    print(f"Total   : {args.steps:,} steps  (~{max(args.steps // spu, 1)} updates)")
     print(f"Output  : {out.resolve()}/{png}")
     print(f"{'='*50}\n")
 
     # ── Run training ──────────────────────────────────────────────────────
-    key = jax.random.PRNGKey(args.seed)
-    live_plot = lambda log: plot_curves(log, out, title, png, cfg, is_curriculum, curriculum_type or "sfl")
-    out.mkdir(parents=True, exist_ok=True)
+    live_plot = lambda log: plot_curves(log, out, title, png, cfg, is_curriculum, curriculum_type)
+    total_updates = max(args.steps // spu, 1)
 
-    train_kwargs = {
-        "key": key, "resume_params": resume_params,
-        "log_callback": live_plot,
-        "checkpoint_dir": out if args.checkpoint_every > 0 else None,
-        "checkpoint_every": args.checkpoint_every,
-    }
-    if args.sfl or args.evosfl:
-        train_kwargs["T_steps"] = args.sfl_inner_steps
-        train_kwargs["render_every"] = args.render_every
-        # ACCEL uses the same base kwargs — no extra args needed
-
-    ts0, ts1, log = trainer.train(**train_kwargs)
+    params, log = trainer.train(
+        total_updates=total_updates, batch_size=batch_size,
+        resume_params=resume_params, log_callback=live_plot,
+        checkpoint_dir=out,
+        checkpoint_every=args.checkpoint_every,
+    )
 
     if log:
-        save_results(log, ts0.params, ts1.params, out, title, png, cfg, is_curriculum, curriculum_type or "sfl")
+        save_results(log, params, params, out, title, png, cfg, is_curriculum, curriculum_type)
 
 
 if __name__ == "__main__":

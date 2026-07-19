@@ -8,8 +8,8 @@ from config import render_tile, render_legend_2col, get_font
 
 # 1. Base Configuration
 TILE_SIZE = 40
-TARGET_PLAYABLE_H = 10
-TARGET_PLAYABLE_W = 10
+TARGET_PLAYABLE_H = 7
+TARGET_PLAYABLE_W = 7
 H, W = TARGET_PLAYABLE_H + 2, TARGET_PLAYABLE_W + 2
 env = OvercookedEnvironment(height=H, width=W)
 gen = LevelGenerator(height=H, width=W)
@@ -59,7 +59,7 @@ _, info_hard = env.reset()
 
 # ── 3. GENERATE AND CONSTRUCT MAP 3 (CUSTOM) ─────────────────────────────────
 print("Generating custom layout...")
-custom_params = [0.5, 0.2, 0.4, -0.3]
+custom_params = [0.7783834934234619,-0.6107226014137268,0.4667209982872009,-0.9123924970626831]
 
 level_elems_custom = gen.create_level_elements(*custom_params, seed=seed)
 level_des_custom = gen.calculate_element_coords(level_elems_custom)
