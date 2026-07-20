@@ -3,7 +3,7 @@
 # in one place instead of scattered across argparse flags.
 
 # ── Algorithm ──────────────────────────────────────────────────────────
-algo: sfl # sfl is the only one build_trainer() currently implements
+algo: sfl # sfl = lightweight NumPy path | sfl_jax = real JAX PPO+SFL stack
 
 # ── Environment ────────────────────────────────────────────────────────────
 grid_size: "7x7" # interior grid dims, HxW (e.g. "7x9")
@@ -18,8 +18,8 @@ obs_mode:
 # refuses to run (raises NotImplementedError) with any non-default value
 # here, rather than silently ignoring it. Leave both at their defaults
 # until the environment work lands.
-view_size: null # int = partial-observability crop radius; null = full grid
-reward_mode: shaped # shaped | sparse — environment.py's reward calc is shaped-only today
+view_size: null # int = partial-observability crop radius; null = full grid (sfl_jax supports int; sfl raises)
+reward_mode: shaped # shaped | sparse | delivery (sfl_jax supports all; sfl only 'shaped')
 
 # ── Training run ─────────────────────────────────────────────────────────
 steps: 2000 # 5000000           # total environment steps to train for
@@ -37,8 +37,9 @@ sfl:
   buffer_size: 25 # top-K levels kept after each pool refresh
   pool_size: 200 # candidate levels scored per refresh
   rho: 0.5 # fraction of each training batch drawn from the buffer
-  rollouts_per_level: 4 # rollouts per candidate when scoring learnability
+  rollouts_per_level: 4 # rollouts per candidate when scoring learnability (sfl only)
   refresh_every: 1 # updates between buffer refreshes
+  inner_steps: 10 # sfl_jax only: PPO updates between buffer refreshes (T_steps)
 
 # ── Checkpointing / output ─────────────────────────────────────────────
 checkpoint_every: 100

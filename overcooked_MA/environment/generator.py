@@ -1,3 +1,14 @@
+"""
+generator.py — level generation + validity checks for the LIGHTWEIGHT NumPy SFL
+stack (algo=sfl / SimpleSFLTrainer). This is the plain-Python/NumPy path used
+for quick local testing; the JAX-native stack (algo=sfl_jax) lives in
+environment/level_generator.py.
+
+compute_min_cycle / is_valid_layout here are the canonical, improved versions —
+environment/level_generator.py mirrors this same compute_min_cycle logic so both
+stacks measure cycle length and validity identically.
+"""
+
 import random
 from collections import deque
 import numpy as np
@@ -8,6 +19,10 @@ def compute_min_cycle(grid: np.ndarray) -> int:
     Returns the minimum delivery cycle length for a single agent.
     Enforces that both agents are within the same walkable space.
     Returns 9999 if the layout is blocked, split, or structurally invalid.
+
+    Lightweight-NumPy SFL stack. This is the canonical implementation; the
+    JAX stack's environment/level_generator.py carries an identical copy so
+    both paths score cycle length / validity the same way.
     """
     grid = np.asarray(grid)
     H, W = grid.shape

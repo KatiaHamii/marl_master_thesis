@@ -13,16 +13,18 @@ from pipeline import run_pipeline
 def main():
     ap = argparse.ArgumentParser(description="Run overcooked_MA SFL training from a config.yaml")
     ap.add_argument("--config", default="config.yaml")
-    ap.add_argument("--algo", default=None, choices=["sfl"], help="Only 'sfl' is implemented today")
+    ap.add_argument("--algo", default=None, choices=["sfl", "sfl_jax"],
+                     help="sfl = lightweight NumPy path; sfl_jax = real JAX PPO+SFL stack")
     ap.add_argument("--grid-size", dest="grid_size", default=None, metavar="HxW")
     ap.add_argument("--steps", type=int, default=None)
     ap.add_argument("--envs", type=int, default=None)
     ap.add_argument("--episode-len", dest="episode_len", type=int, default=None)
     ap.add_argument("--view-size", dest="view_size", type=int, default=None,
-                     help="Partial-observability crop radius. NOT YET IMPLEMENTED — "
-                          "build_environment() raises if this is set.")
-    ap.add_argument("--reward-mode", dest="reward_mode", default=None, choices=["shaped", "sparse"],
-                     help="NOT YET IMPLEMENTED — only 'shaped' currently works.")
+                     help="Partial-observability crop radius. Supported by sfl_jax; "
+                          "sfl (NumPy) raises if this is set.")
+    ap.add_argument("--reward-mode", dest="reward_mode", default=None,
+                     choices=["shaped", "sparse", "delivery"],
+                     help="Supported by sfl_jax; sfl (NumPy) only supports 'shaped'.")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--checkpoint-every", dest="checkpoint_every", type=int, default=None)
     ap.add_argument("--out-dir", dest="out_dir", default=None)
