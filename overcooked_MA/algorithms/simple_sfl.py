@@ -171,12 +171,13 @@ class SimpleSFLTrainer:
             grid, params_vec = self._random_level()
             score, self.key = self._score_level(params, grid, self.key)
             candidates.append({"grid": grid, "params": params_vec, "score": score})
-            if (i + 1) % heartbeat == 0 or i + 1 == self.pool_size:
-                print(
-                    f"[SimpleSFL] scoring buffer candidates: {i + 1}/{self.pool_size} "
-                    f"({time.time() - t_start:.1f}s elapsed)",
-                    flush=True,
-                )
+            # if (i + 1) % heartbeat == 0 or i + 1 == self.pool_size:
+            #     print(
+            #         f"[SimpleSFL] scoring buffer candidates: {i + 1}/{self.pool_size} "
+            #         f"({time.time() - t_start:.1f}s elapsed)",
+            #         flush=True,
+            #     )
+        print(f"[SimpleSFL] scored {self.pool_size} candidates in {time.time() - t_start:.1f}s", flush=True)
         candidates.sort(key=lambda c: c["score"], reverse=True)
         self.buffer = candidates[: self.buffer_size]
 

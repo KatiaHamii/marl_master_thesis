@@ -1,0 +1,46 @@
+# config.yaml — training configuration for overcooked_MA SFL training.
+# Not wired into train.py yet — this just captures the current defaults
+# in one place instead of scattered across argparse flags.
+
+# ── Algorithm ──────────────────────────────────────────────────────────
+algo: sfl # sfl is the only one build_trainer() currently implements
+
+# ── Environment ────────────────────────────────────────────────────────────
+grid_size: "7x7" # interior grid dims, HxW (e.g. "7x9")
+episode_len: 50 #150 # max steps per rollout before truncation
+obs_mode:
+  rich # rich | simple — the observation *channel encoding*, passed to
+  # networks.ActorCritic (implemented). Orthogonal to view_size below —
+  # this is NOT full vs partial observability, that's view_size.
+
+# NOT YET IMPLEMENTED — environment.py doesn't support either of these yet.
+# The fields exist so the config surface is ready, but build_environment()
+# refuses to run (raises NotImplementedError) with any non-default value
+# here, rather than silently ignoring it. Leave both at their defaults
+# until the environment work lands.
+view_size: null # int = partial-observability crop radius; null = full grid
+reward_mode: shaped # shaped | sparse — environment.py's reward calc is shaped-only today
+
+# ── Training run ─────────────────────────────────────────────────────────
+steps: 2000 # 5000000           # total environment steps to train for
+envs: 8 #16                  # levels sampled per update (batch size)
+seed: 42
+
+# ── Optimizer / policy (read via cfg.get(...) in SimpleSFLTrainer) ────────
+lr: 0.0001
+ent_coef: 0.05
+vf_coef: 0.5
+gamma: 0.99
+
+# ── SFL curriculum ──────────────────────────────────────────────────────
+sfl:
+  buffer_size: 25 # top-K levels kept after each pool refresh
+  pool_size: 200 # candidate levels scored per refresh
+  rho: 0.5 # fraction of each training batch drawn from the buffer
+  rollouts_per_level: 4 # rollouts per candidate when scoring learnability
+  refresh_every: 1 # updates between buffer refreshes
+
+# ── Checkpointing / output ─────────────────────────────────────────────
+checkpoint_every: 100
+out_dir: results
+load_checkpoint: null
